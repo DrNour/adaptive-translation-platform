@@ -1,78 +1,67 @@
 import streamlit as st
 import sqlite3
-import os
+import hashlib
 
-# Database setup
-DB_FILE = "translation_platform.db"
+# ---------------- Database Setup ----------------
+conn = sqlite3.connect("users.db")
+c = conn.cursor()
+c.execute('''
+    CREATE TABLE IF NOT EXISTS users(
+        username TEXT PRIMARY KEY,
+        password TEXT,
+        role TEXT
+    )
+''')
+conn.commit()
 
-def init_db():
-    if not os.path.exists(DB_FILE):
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE,
-                password TEXT,
-                role TEXT
-            )
-        ''')
-        conn.commit()
-        conn.close()
+# ---------------- Helper Functions ----------------
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
 
-def add_user(username, password, role):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
+def register_user(username, password, role):
     try:
-        c.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", (username, password, role))
+        c.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", 
+                  (username, hash_password(password), role))
         conn.commit()
-        return True
+        st.success("Registration successful! You can now log in.")
     except sqlite3.IntegrityError:
-        return False
-    finally:
-        conn.close()
+        st.error("Username already exists. Choose another.")
 
-def verify_user(username, password, role):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE username=? AND password=? AND role=?", (username, password, role))
-    user = c.fetchone()
-    conn.close()
-    return user
+def authenticate_user(username, password):
+    c.execute("SELECT * FROM users WHERE username=? AND password=?", 
+              (username, hash_password(password)))
+    return c.fetchone()
 
-# Streamlit App
-st.title("🔐 Adaptive Translation Platform")
+# ---------------- Streamlit UI ----------------
+st.title("Adaptive Translation Platform Login / Registration")
 
-tab = st.tabs(["Login", "Register"])
-with tab[0]:  # Login tab
-    st.subheader("Login")
-    username = st.text_input("Username", key="login_user")
-    password = st.text_input("Password", type="password", key="login_pass")
-    role = st.selectbox("Role", ["student", "instructor"], key="login_role")
-    if st.button("Login"):
-        user = verify_user(username, password, role)
-        if user:
-            st.success(f"Welcome, {username}! You are logged in as {role}.")
-            if role == "student":
-                st.info("Redirecting to student dashboard...")
-                os.system("streamlit run student_dashboard.py")
-            else:
-                st.info("Redirecting to instructor dashboard...")
-                os.system("streamlit run instructor_dashboard.py")
-        else:
-            st.error("Invalid credentials. Please try again.")
+menu = ["Login", "Register"]
+choice = st.sidebar.selectbox("Menu", menu)
 
-with tab[1]:  # Registration tab
-    st.subheader("Register")
-    new_user = st.text_input("New Username", key="reg_user")
-    new_pass = st.text_input("New Password", type="password", key="reg_pass")
-    new_role = st.selectbox("Role", ["student", "instructor"], key="reg_role")
+if choice == "Register":
+    st.subheader("Create a New Account")
+    new_user = st.text_input("Username")
+    new_password = st.text_input("Password", type='password')
+    role = st.selectbox("Role", ["Student", "Instructor"])
     if st.button("Register"):
-        success = add_user(new_user, new_pass, new_role)
-        if success:
-            st.success("Registration successful! You can now log in.")
+        if new_user and new_password:
+            register_user(new_user, new_password, role)
         else:
-            st.error("Username already exists. Try a different one.")
+            st.error("Please provide both username and password.")
 
-# Initialize DB
-init_db()
+elif choice == "Login":
+    st.subheader("Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type='password')
+    if st.button("Login"):
+        user = authenticate_user(username, password)
+        if user:
+            st.success(f"Welcome {user[0]}! You are logged in as {user[2]}.")
+            if user[2] == "Student":
+                st.info("Redirecting to Student Dashboard...")
+                # Here you can call student_dashboard.py functions
+            else:
+                st.info("Redirecting to Instructor Dashboard...")
+                # Here you can call instructor_dashboard.py functions
+        else:
+            st.error("Incorrect username or password")
