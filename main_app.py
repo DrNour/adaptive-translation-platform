@@ -153,13 +153,14 @@ def show_teacher_dashboard():
         st.experimental_rerun()
 
 # ----------------- App -----------------
-# Auto-login remembered user (safe check)
+# Auto-login remembered user (robust check)
 if os.path.exists("remembered_user.json") and not st.session_state.logged_in:
     with open("remembered_user.json") as f:
         remembered = json.load(f)
-        if "username" in remembered:
+        username = remembered.get("username")  # safe check
+        if username:
             st.session_state.logged_in = True
-            st.session_state.username = remembered["username"]
+            st.session_state.username = username
 
 # Routing
 if st.session_state.logged_in:
