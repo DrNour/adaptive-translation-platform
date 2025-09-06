@@ -2,8 +2,8 @@ import streamlit as st
 import json
 import os
 import hashlib
-from googletrans import Translator
 import re
+from deep_translator import GoogleTranslator  # <-- updated library
 
 # ----------------- File paths -----------------
 USER_FILE = "users.json"
@@ -24,11 +24,9 @@ if os.path.exists(DATA_FILE):
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
-translator = Translator()
-
 def translate_text(text, dest="ar"):
     try:
-        return translator.translate(text, dest=dest).text
+        return GoogleTranslator(source='auto', target=dest).translate(text)
     except:
         return "[Translation failed]"
 
