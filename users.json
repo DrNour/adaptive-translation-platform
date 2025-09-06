@@ -1,9 +1,0 @@
-{
-  "students": {
-    "student1": "pass123",
-    "student2": "pass456"
-  },
-  "instructors": {
-    "instructor1": "teach123"
-  }
-}
