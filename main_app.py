@@ -33,15 +33,6 @@ def translate_text(text, dest_lang):
     except:
         return "[Translation failed]"
 
-def extract_glossary(text):
-    words = text.split()
-    freq = {}
-    for word in words:
-        word = word.lower()
-        if len(word) > 3:
-            freq[word] = freq.get(word, 0) + 1
-    return [w for w, _ in sorted(freq.items(), key=lambda x: x[1], reverse=True)[:5]]
-
 def compute_word_diff(old, new):
     old_words = old.split()
     new_words = new.split()
@@ -69,7 +60,7 @@ def compute_effort(old, new, start_time, end_time):
     return edits, time_spent
 
 # ----------------- Session state -----------------
-for key in ["logged_in", "username", "role", "remember_me", "source_text", "mt_text", "post_edit", "start_time"]:
+for key in ["logged_in", "username", "role", "remember_me", "source_text", "mt_text", "post_edit", "start_time", "src_lang", "dest_lang"]:
     if key not in st.session_state:
         st.session_state[key] = None
 
@@ -80,7 +71,7 @@ def register_user(username, password, role):
     users[username] = {
         "password": hash_password(password),
         "role": role,
-        "status": "pending"  # Admin approval needed
+        "status": "pending"
     }
     with open(USER_FILE, "w") as f:
         json.dump(users, f, indent=4)
@@ -117,7 +108,93 @@ def logout_user():
         os.remove(REMEMBER_FILE)
 
 # ----------------- Dashboards -----------------
-# Student, Instructor, Admin dashboards remain same as previous code snippet
+def student_dashboard():
+    st.title(f"Student Dashboard ({st.session_state.username})")
+    st.subheader("Translate / Post-edit")
+
+    # Language direction
+    if st.session_state.dest_lang is None:
+        st.session_state.dest_lang = "ar"
+
+    source_text = st.text_area("Enter text to translate:", value=st.session_state.source_text or "")
+    col1, col2 = st.columns([1,1])
+    with col1:
+        if st.button("Translate"):
+            if source_text:
+                st.session_state.source_text = source_text
+                st.session_state.mt_text = translate_text(source_text, st.session_state.dest_lang)
+                st.session_state.start_time = datetime.now()
+    with col2:
+        if st.button("Swap English ↔ Arabic"):
+            # Swap destination language
+            st.session_state.dest_lang = "en" if st.session_state.dest_lang=="ar" else "ar"
+            if source_text:
+                st.session_state.mt_text = translate_text(source_text, st.session_state.dest_lang)
+                st.session_state.start_time = datetime.now()
+                st.success(f"Swapped translation to {st.session_state.dest_lang.upper()}")
+
+    # Show MT
+    if st.session_state.mt_text:
+        st.text_area("Machine Translation", value=st.session_state.mt_text, key="mt_text_area")
+
+        # Post-edit
+        post_edit = st.text_area("Post-edit translation:", value=st.session_state.mt_text, key="post_edit_area")
+        if st.button("Submit Post-edit"):
+            end_time = datetime.now()
+            edits, time_spent = compute_effort(st.session_state.mt_text, post_edit, st.session_state.start_time, end_time)
+            submissions[st.session_state.username] = {
+                "source_text": st.session_state.source_text,
+                "mt_text": st.session_state.mt_text,
+                "post_edit": post_edit,
+                "edits": edits,
+                "time_sec": time_spent
+            }
+            with open(DATA_FILE, "w") as f:
+                json.dump(submissions, f, indent=4)
+            st.success(f"Submitted! Edits: {edits}, Time spent: {time_spent:.1f}s")
+            left, right = compute_word_diff(st.session_state.mt_text, post_edit)
+            st.markdown(f"**Track Changes (MT vs Post-edit):**")
+            st.markdown(f"<div>{left}</div><div>{right}</div>", unsafe_allow_html=True)
+
+def instructor_dashboard():
+    st.title(f"Instructor Dashboard ({st.session_state.username})")
+    st.subheader("Student Submissions")
+    if submissions:
+        for student, data in submissions.items():
+            st.markdown(f"**Student:** {student}")
+            st.markdown(f"Source: {data['source_text']}")
+            st.markdown(f"MT: {data['mt_text']}")
+            st.markdown(f"Post-edit: {data['post_edit']}")
+            st.markdown(f"Edits: {data['edits']}, Time: {data['time_sec']:.1f}s")
+            st.markdown("---")
+    else:
+        st.info("No submissions yet.")
+
+def admin_dashboard():
+    st.title("Administrator Dashboard")
+
+    # Pending approvals
+    st.subheader("Pending User Approvals")
+    pending_users = [u for u, v in users.items() if v.get("status") == "pending"]
+    for u in pending_users:
+        if st.button(f"Approve {u}"):
+            users[u]["status"] = "approved"
+            with open(USER_FILE, "w") as f:
+                json.dump(users, f, indent=4)
+            st.success(f"{u} approved!")
+
+    # Role switcher
+    view_as = st.radio("View app as:", ["Admin Full", "Student", "Instructor"], index=0)
+    if view_as == "Admin Full":
+        st.subheader("Student Dashboard")
+        student_dashboard()
+        st.markdown("---")
+        st.subheader("Instructor Dashboard")
+        instructor_dashboard()
+    elif view_as == "Student":
+        student_dashboard()
+    elif view_as == "Instructor":
+        instructor_dashboard()
 
 # ----------------- Main App -----------------
 if not st.session_state.logged_in:
