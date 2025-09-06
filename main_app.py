@@ -15,7 +15,6 @@ REMEMBER_FILE = "remembered_user.json"
 # ----------------- Admin credentials -----------------
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "StrongAdminPassword123!"  # Change this
-ADMIN_ROLE = "Admin"
 
 # ----------------- Initialize data -----------------
 for f in [USER_FILE, DATA_FILE, REMEMBER_FILE]:
@@ -82,21 +81,26 @@ for key in ["logged_in", "username", "role", "remember_me", "source_text", "mt_t
 def register_user(username, password, role):
     if username in users:
         return False, "Username already exists!"
-    users[username] = {"password": hash_password(password), "role": role}
+    users[username] = {
+        "password": hash_password(password),
+        "role": role,
+        "status": "pending"  # Admin approval needed
+    }
     with open(USER_FILE, "w") as f:
-        json.dump(users, f)
+        json.dump(users, f, indent=4)
     return True, "User registered successfully!"
 
 def login_user(username, password, remember=False):
-    if username in users and users[username]["password"] == hash_password(password):
-        st.session_state.logged_in = True
-        st.session_state.username = username
-        st.session_state.role = users[username]["role"]
-        st.session_state.remember_me = remember
-        if remember:
-            with open(REMEMBER_FILE, "w") as f:
-                json.dump({"username": username}, f)
-        return True, f"Logged in as {username}"
+    user = users.get(username)
+    if user:
+        if user["password"] == hash_password(password):
+            if user.get("status", "approved") != "approved":
+                return False, "Your account is pending admin approval."
+            st.session_state.logged_in = True
+            st.session_state.username = username
+            st.session_state.role = user["role"]
+            st.session_state.remember_me = remember
+            return True, f"Logged in as {username}"
     return False, "Invalid username or password"
 
 def logout_user():
@@ -161,7 +165,6 @@ def student_dashboard():
         user_subs = submissions.get(st.session_state.username, [])
         for i, sub in enumerate(user_subs, 1):
             st.write(f"**Submission {i}**")
-            st.write(f"Source: {sub['source']}")
             left_html, right_html = compute_word_diff(sub['mt'], sub['post_edit'])
             col1, col2 = st.columns(2)
             with col1:
@@ -204,61 +207,66 @@ def instructor_dashboard():
 def admin_dashboard():
     st.title("Administrator Dashboard")
 
+    # Pending approvals
+    st.subheader("Pending User Approvals")
+    pending_users = [u for u, v in users.items() if v.get("status") == "pending"]
+    for u in pending_users:
+        if st.button(f"Approve {u}"):
+            users[u]["status"] = "approved"
+            with open(USER_FILE, "w") as f:
+                json.dump(users, f, indent=4)
+            st.success(f"{u} approved!")
+
     # Role switcher
     view_as = st.radio("View app as:", ["Admin Full", "Student", "Instructor"], index=0)
-
     if view_as == "Admin Full":
-        st.subheader("You are in full admin mode.")
-        st.write("You can see both student and instructor dashboards together.")
-        st.markdown("---")
         st.subheader("Student Dashboard")
         student_dashboard()
         st.markdown("---")
         st.subheader("Instructor Dashboard")
         instructor_dashboard()
     elif view_as == "Student":
-        st.subheader("Viewing as Student")
         student_dashboard()
     elif view_as == "Instructor":
-        st.subheader("Viewing as Instructor")
         instructor_dashboard()
 
-# ----------------- App Routing -----------------
-if st.session_state.logged_in:
-    if st.session_state.username == ADMIN_USERNAME:
+# ----------------- Main App -----------------
+if not st.session_state.logged_in:
+    st.title("Adaptive Translation Platform")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("Login")
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        remember = st.checkbox("Remember me")
+        if st.button("Login"):
+            success, msg = login_user(username, password, remember)
+            if success:
+                if remember:
+                    with open(REMEMBER_FILE, "w") as f:
+                        json.dump({"username": username}, f)
+                st.success(msg)
+            else:
+                st.error(msg)
+    with col2:
+        st.subheader("Register")
+        new_username = st.text_input("New username")
+        new_password = st.text_input("New password", type="password")
+        role = st.selectbox("Role", ["Student", "Instructor"])
+        if st.button("Register"):
+            if role == "Admin":
+                st.error("Cannot register as Admin!")
+            else:
+                success, msg = register_user(new_username, new_password, role)
+                if success:
+                    st.success(msg + " Wait for admin approval.")
+                else:
+                    st.error(msg)
+else:
+    st.sidebar.button("Logout", on_click=logout_user)
+    if st.session_state.role == "Admin":
         admin_dashboard()
     elif st.session_state.role == "Instructor":
         instructor_dashboard()
     else:
         student_dashboard()
-else:
-    st.subheader("Login or Register")
-    username = st.text_input("Username", key="auth_user")
-    password = st.text_input("Password", type="password", key="auth_pass")
-    role = st.selectbox("Role", ["Student", "Instructor"], key="auth_role")
-    remember = st.checkbox("Remember Me", key="auth_remember")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Login"):
-            if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
-                st.session_state.logged_in = True
-                st.session_state.username = username
-                st.session_state.role = "Admin"
-                st.experimental_rerun()
-            else:
-                success, msg = login_user(username, password, remember)
-                if success:
-                    st.success(msg)
-                    st.experimental_rerun()
-                else:
-                    st.error(msg)
-    with col2:
-        if st.button("Register"):
-            if role == "Admin":
-                st.error("Cannot register as Admin!")
-            else:
-                success, msg = register_user(username, password, role)
-                if success:
-                    st.success(msg)
-                else:
-                    st.error(msg)
