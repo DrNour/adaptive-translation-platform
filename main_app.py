@@ -3,7 +3,7 @@ import json
 import os
 import hashlib
 import re
-from deep_translator import GoogleTranslator  # <-- updated library
+from deep_translator import GoogleTranslator  # updated library
 
 # ----------------- File paths -----------------
 USER_FILE = "users.json"
@@ -153,12 +153,13 @@ def show_teacher_dashboard():
         st.experimental_rerun()
 
 # ----------------- App -----------------
-# Auto-login remembered user
+# Auto-login remembered user (safe check)
 if os.path.exists("remembered_user.json") and not st.session_state.logged_in:
     with open("remembered_user.json") as f:
         remembered = json.load(f)
-        st.session_state.logged_in = True
-        st.session_state.username = remembered["username"]
+        if "username" in remembered:
+            st.session_state.logged_in = True
+            st.session_state.username = remembered["username"]
 
 # Routing
 if st.session_state.logged_in:
