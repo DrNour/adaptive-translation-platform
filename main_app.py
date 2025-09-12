@@ -1,238 +1,174 @@
 import streamlit as st
-import json
+import pandas as pd
 import os
-import hashlib
-from deep_translator import GoogleTranslator
-import difflib
-import Levenshtein
+import json
 from datetime import datetime
+from db_utils import (
+    init_db, register_user, validate_login, get_user_role,
+    get_tasks, save_submission, get_submissions, get_idioms,
+    add_idiom, delete_idiom, get_practice_bank, add_practice_item,
+    assign_practices_to_user, get_student_practice, mark_practice_completed,
+    load_heuristics, save_heuristics, compute_error_pattern
+)
+from metrics_utils import (
+    compute_bleu_chrf, compute_semantic_score, compute_edits_effort,
+    plot_radar_for_student_metrics
+)
 
-# ----------------- File paths -----------------
-USER_FILE = "users.json"
-DATA_FILE = "submissions.json"
-REMEMBER_FILE = "remembered_user.json"
+# -----------------------------
+# APP ENTRY
+# -----------------------------
 
-# ----------------- Initialize data -----------------
-for f in [USER_FILE, DATA_FILE, REMEMBER_FILE]:
-    if not os.path.exists(f):
-        with open(f, "w") as file:
-            json.dump({}, file)
-
-with open(USER_FILE, "r") as f:
-    users = json.load(f)
-with open(DATA_FILE, "r") as f:
-    submissions = json.load(f)
-
-# ----------------- Helpers -----------------
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
-
-def translate_text(text, dest_lang):
-    try:
-        return GoogleTranslator(source='auto', target=dest_lang).translate(text)
-    except:
-        return "[Translation failed]"
-
-def compute_word_diff(old, new):
-    old_words = old.split()
-    new_words = new.split()
-    sm = difflib.SequenceMatcher(None, old_words, new_words)
-    html_left = ""
-    html_right = ""
-    for tag, i1, i2, j1, j2 in sm.get_opcodes():
-        old_chunk = " ".join(old_words[i1:i2])
-        new_chunk = " ".join(new_words[j1:j2])
-        if tag == "equal":
-            html_left += old_chunk + " "
-            html_right += new_chunk + " "
-        elif tag == "replace":
-            html_left += f"<span style='background-color:red' title='Replaced'>{old_chunk}</span> "
-            html_right += f"<span style='background-color:yellow' title='Replacement'>{new_chunk}</span> "
-        elif tag == "delete":
-            html_left += f"<span style='background-color:red' title='Deleted'>{old_chunk}</span> "
-        elif tag == "insert":
-            html_right += f"<span style='background-color:green' title='Inserted'>{new_chunk}</span> "
-    return html_left, html_right
-
-def compute_effort(old, new, start_time, end_time):
-    edits = Levenshtein.distance(old, new)
-    time_spent = (end_time - start_time).total_seconds()
-    return edits, time_spent
-
-# ----------------- Session state -----------------
-for key in ["logged_in", "username", "role", "remember_me", "source_text", "mt_text", "post_edit", "start_time", "src_lang", "dest_lang"]:
-    if key not in st.session_state:
-        st.session_state[key] = None
-
-# ----------------- Authentication -----------------
-def register_user(username, password, role):
-    if username in users:
-        return False, "Username already exists!"
-    users[username] = {
-        "password": hash_password(password),
-        "role": role,
-        "status": "pending"
-    }
-    with open(USER_FILE, "w") as f:
-        json.dump(users, f, indent=4)
-    return True, "User registered successfully!"
-
-def login_user(username, password, remember=False):
-    # Admin login bypass
-    if username == "admin" and password == "StrongAdminPassword123!":
-        st.session_state.logged_in = True
-        st.session_state.username = username
-        st.session_state.role = "Admin"
-        return True, "Logged in as Admin"
-
-    user = users.get(username)
-    if user:
-        if user["password"] == hash_password(password):
-            if user.get("status", "approved") != "approved":
-                return False, "Your account is pending admin approval."
-            st.session_state.logged_in = True
+def show_login():
+    st.markdown("### 🔐 Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    if st.button("Login"):
+        if validate_login(username, password):
             st.session_state.username = username
-            st.session_state.role = user["role"]
-            st.session_state.remember_me = remember
-            return True, f"Logged in as {username}"
-    return False, "Invalid username or password"
+            st.session_state.role = get_user_role(username)
+            st.experimental_rerun()
+        else:
+            st.error("Invalid login")
 
-def logout_user():
-    st.session_state.logged_in = False
-    st.session_state.username = ""
-    st.session_state.role = ""
-    st.session_state.remember_me = False
-    st.session_state.mt_text = ""
-    st.session_state.post_edit = ""
-    if os.path.exists(REMEMBER_FILE):
-        os.remove(REMEMBER_FILE)
+def show_register():
+    st.markdown("### 📝 Register")
+    username = st.text_input("Username", key="r_user")
+    password = st.text_input("Password", type="password", key="r_pass")
+    role = st.selectbox("Role", ["Student", "Instructor"])
+    if st.button("Register"):
+        ok = register_user(username, password, role)
+        if ok:
+            st.success("Registration submitted. Waiting for admin approval.")
+        else:
+            st.error("Username already exists.")
 
-# ----------------- Dashboards -----------------
+# -----------------------------
+# DASHBOARDS
+# -----------------------------
+
 def student_dashboard():
-    st.title(f"Student Dashboard ({st.session_state.username})")
-    st.subheader("Translate / Post-edit")
+    st.sidebar.markdown(f"👤 Logged in as: {st.session_state.username} ({st.session_state.role})")
+    st.sidebar.button("Logout", on_click=lambda: st.session_state.clear())
 
-    # Language direction
-    if st.session_state.dest_lang is None:
-        st.session_state.dest_lang = "ar"
+    st.title("🎓 Student Dashboard")
 
-    source_text = st.text_area("Enter text to translate:", value=st.session_state.source_text or "")
-    col1, col2 = st.columns([1,1])
-    with col1:
-        if st.button("Translate"):
-            if source_text:
-                st.session_state.source_text = source_text
-                st.session_state.mt_text = translate_text(source_text, st.session_state.dest_lang)
-                st.session_state.start_time = datetime.now()
-    with col2:
-        if st.button("Swap English ↔ Arabic"):
-            # Swap destination language
-            st.session_state.dest_lang = "en" if st.session_state.dest_lang=="ar" else "ar"
-            if source_text:
-                st.session_state.mt_text = translate_text(source_text, st.session_state.dest_lang)
-                st.session_state.start_time = datetime.now()
-                st.success(f"Swapped translation to {st.session_state.dest_lang.upper()}")
+    # Tasks
+    st.subheader("📌 Translation Tasks")
+    tasks = get_tasks()
+    if not tasks:
+        st.info("No tasks assigned yet.")
+    else:
+        for tid, text in tasks:
+            st.markdown(f"**Task {tid}:** {text}")
+            mt_text = st.text_area("Machine Translation (for comparison)", key=f"mt_{tid}")
+            post_edit = st.text_area("Your Translation / Post-edit", key=f"pe_{tid}")
+            if st.button(f"Submit Task {tid}"):
+                bleu, chrf = compute_bleu_chrf(text, post_edit)
+                semantic = compute_semantic_score(text, post_edit)
+                edits, effort = compute_edits_effort(mt_text, post_edit)
+                save_submission(st.session_state.username, tid, text, mt_text, post_edit,
+                                bleu, chrf, semantic, edits, effort)
+                st.success("Submission saved!")
 
-    # Show MT
-    if st.session_state.mt_text:
-        st.text_area("Machine Translation", value=st.session_state.mt_text, key="mt_text_area")
+    # Error pattern + radar chart
+    st.subheader("📊 My Progress")
+    pattern = compute_error_pattern(st.session_state.username)
+    if pattern:
+        st.json(pattern)
+        fig = plot_radar_for_student_metrics({
+            "BLEU": pattern.get("avg_bleu", 0),
+            "chrF": pattern.get("avg_chrf", 0),
+            "Semantic": pattern.get("avg_semantic", 0),
+            "Effort": min(100, pattern.get("avg_effort", 0)),
+            "Edits": min(100, pattern.get("avg_edits", 0))
+        })
+        st.plotly_chart(fig, use_container_width=True)
 
-        # Post-edit
-        post_edit = st.text_area("Post-edit translation:", value=st.session_state.mt_text, key="post_edit_area")
-        if st.button("Submit Post-edit"):
-            end_time = datetime.now()
-            edits, time_spent = compute_effort(st.session_state.mt_text, post_edit, st.session_state.start_time, end_time)
-            submissions[st.session_state.username] = {
-                "source_text": st.session_state.source_text,
-                "mt_text": st.session_state.mt_text,
-                "post_edit": post_edit,
-                "edits": edits,
-                "time_sec": time_spent
-            }
-            with open(DATA_FILE, "w") as f:
-                json.dump(submissions, f, indent=4)
-            st.success(f"Submitted! Edits: {edits}, Time spent: {time_spent:.1f}s")
-            left, right = compute_word_diff(st.session_state.mt_text, post_edit)
-            st.markdown(f"**Track Changes (MT vs Post-edit):**")
-            st.markdown(f"<div>{left}</div><div>{right}</div>", unsafe_allow_html=True)
+    # Practice queue
+    st.subheader("🗂 My Practice Queue")
+    queue = get_student_practice(st.session_state.username)
+    if not queue:
+        st.info("No practice items yet.")
+    else:
+        for sp_id, pid, cat, prompt, ref, status, assigned_at, completed_at in queue:
+            st.markdown(f"**[{status.upper()}]** ({cat}) {prompt}")
+            if status == "recommended":
+                if st.button(f"Do Practice {sp_id}"):
+                    st.session_state.active_practice = (sp_id, prompt, ref)
+                    st.experimental_rerun()
+            if status == "completed":
+                st.caption(f"Completed: {completed_at}")
+
+        if "active_practice" in st.session_state and st.session_state.active_practice:
+            sp_id, prompt, ref = st.session_state.active_practice
+            st.text_area("Practice prompt", prompt, disabled=True)
+            ans = st.text_area("Your translation", key=f"prac_{sp_id}")
+            if st.button("Submit Practice"):
+                mark_practice_completed(sp_id, ans, st.session_state.username)
+                st.success("Practice completed!")
+                st.session_state.active_practice = None
+                st.experimental_rerun()
 
 def instructor_dashboard():
-    st.title(f"Instructor Dashboard ({st.session_state.username})")
-    st.subheader("Student Submissions")
-    if submissions:
-        for student, data in submissions.items():
-            st.markdown(f"**Student:** {student}")
-            st.markdown(f"Source: {data['source_text']}")
-            st.markdown(f"MT: {data['mt_text']}")
-            st.markdown(f"Post-edit: {data['post_edit']}")
-            st.markdown(f"Edits: {data['edits']}, Time: {data['time_sec']:.1f}s")
-            st.markdown("---")
-    else:
-        st.info("No submissions yet.")
+    st.sidebar.markdown(f"👤 Logged in as: {st.session_state.username} ({st.session_state.role})")
+    st.sidebar.button("Logout", on_click=lambda: st.session_state.clear())
+
+    st.title("👨‍🏫 Instructor Dashboard")
+
+    st.subheader("📌 Practice Bank")
+    cat = st.text_input("Category")
+    prompt = st.text_area("Practice prompt")
+    ref = st.text_area("Reference translation")
+    if st.button("Add Practice"):
+        add_practice_item(cat, prompt, ref)
+        st.success("Practice added!")
+
+    st.subheader("🔧 Assign Practices")
+    practices = get_practice_bank()
+    st.table(practices)
 
 def admin_dashboard():
-    st.title("Administrator Dashboard")
+    st.sidebar.markdown(f"👤 Logged in as: {st.session_state.username} ({st.session_state.role})")
+    st.sidebar.button("Logout", on_click=lambda: st.session_state.clear())
 
-    # Pending approvals
-    st.subheader("Pending User Approvals")
-    pending_users = [u for u, v in users.items() if v.get("status") == "pending"]
-    for u in pending_users:
-        if st.button(f"Approve {u}"):
-            users[u]["status"] = "approved"
-            with open(USER_FILE, "w") as f:
-                json.dump(users, f, indent=4)
-            st.success(f"{u} approved!")
+    st.title("🛠 Admin Dashboard")
 
-    # Role switcher
-    view_as = st.radio("View app as:", ["Admin Full", "Student", "Instructor"], index=0)
-    if view_as == "Admin Full":
-        st.subheader("Student Dashboard")
-        student_dashboard()
-        st.markdown("---")
-        st.subheader("Instructor Dashboard")
-        instructor_dashboard()
-    elif view_as == "Student":
-        student_dashboard()
-    elif view_as == "Instructor":
-        instructor_dashboard()
+    st.subheader("⚙️ Heuristics")
+    h = load_heuristics()
+    sem = st.number_input("Semantic threshold", 0, 100, h.get("semantic_threshold", 65))
+    bleu = st.number_input("BLEU threshold", 0, 100, h.get("bleu_threshold", 30))
+    chrf = st.number_input("chrF threshold", 0, 100, h.get("chrf_threshold", 40))
+    if st.button("Save Heuristics"):
+        h["semantic_threshold"] = sem
+        h["bleu_threshold"] = bleu
+        h["chrf_threshold"] = chrf
+        save_heuristics(h)
+        st.success("Saved!")
 
-# ----------------- Main App -----------------
-if not st.session_state.logged_in:
-    st.title("Adaptive Translation Platform")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Login")
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        remember = st.checkbox("Remember me")
-        if st.button("Login"):
-            success, msg = login_user(username, password, remember)
-            if success:
-                if remember:
-                    with open(REMEMBER_FILE, "w") as f:
-                        json.dump({"username": username}, f)
-                st.success(msg)
-            else:
-                st.error(msg)
-    with col2:
-        st.subheader("Register")
-        new_username = st.text_input("New username")
-        new_password = st.text_input("New password", type="password")
-        role = st.selectbox("Role", ["Student", "Instructor"])
-        if st.button("Register"):
-            if role == "Admin":
-                st.error("Cannot register as Admin!")
-            else:
-                success, msg = register_user(new_username, new_password, role)
-                if success:
-                    st.success(msg + " Wait for admin approval.")
-                else:
-                    st.error(msg)
-else:
-    st.sidebar.button("Logout", on_click=logout_user)
-    if st.session_state.role == "Admin":
-        admin_dashboard()
-    elif st.session_state.role == "Instructor":
-        instructor_dashboard()
+# -----------------------------
+# MAIN
+# -----------------------------
+
+def main():
+    init_db()
+    if "username" not in st.session_state:
+        st.session_state.username = None
+
+    if st.session_state.username is None:
+        tab1, tab2 = st.tabs(["Login", "Register"])
+        with tab1:
+            show_login()
+        with tab2:
+            show_register()
     else:
-        student_dashboard()
+        role = st.session_state.role
+        if role == "Student":
+            student_dashboard()
+        elif role == "Instructor":
+            instructor_dashboard()
+        elif role == "Admin":
+            admin_dashboard()
+
+if __name__ == "__main__":
+    main()
