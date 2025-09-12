@@ -1,0 +1,6 @@
+streamlit
+pandas
+numpy
+plotly
+sacrebleu
+python-Levenshtein
