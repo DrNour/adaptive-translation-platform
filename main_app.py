@@ -1,19 +1,11 @@
-# main_app.py
 import streamlit as st
-from db_utils import (
-    init_db, register_user, validate_login, get_user_role,
-    get_tasks, save_submission, get_student_practice,
-    get_practice_bank, add_practice_item, mark_practice_completed
-)
-from metrics_utils import (
-    compute_bleu_chrf, compute_semantic_score, compute_edits_effort,
-    plot_radar_for_student_metrics
-)
+from db_utils import *
+from metrics_utils import *
+from datetime import datetime
 
 # -----------------------------
 # LOGIN / REGISTER
 # -----------------------------
-
 def show_login():
     st.markdown("### 🔐 Login")
     username = st.text_input("Username")
@@ -34,20 +26,20 @@ def show_register():
     if st.button("Register"):
         ok = register_user(username, password, role)
         if ok:
-            st.success("Registration successful!")
+            st.success("Registration successful! You can now login.")
         else:
             st.error("Username already exists.")
 
 # -----------------------------
-# STUDENT DASHBOARD
+# DASHBOARDS
 # -----------------------------
-
 def student_dashboard():
     st.sidebar.markdown(f"👤 Logged in as: {st.session_state.username} ({st.session_state.role})")
     st.sidebar.button("Logout", on_click=lambda: st.session_state.clear())
 
     st.title("🎓 Student Dashboard")
 
+    # Tasks
     st.subheader("📌 Translation Tasks")
     tasks = get_tasks()
     if not tasks:
@@ -58,16 +50,37 @@ def student_dashboard():
             mt_text = st.text_area("Machine Translation (for comparison)", key=f"mt_{tid}")
             post_edit = st.text_area("Your Translation / Post-edit", key=f"pe_{tid}")
             if st.button(f"Submit Task {tid}"):
-                # Compute metrics
                 bleu, chrf = compute_bleu_chrf(text, post_edit)
                 semantic = compute_semantic_score(text, post_edit)
                 edits, effort = compute_edits_effort(mt_text, post_edit)
-                fluency, colloc, idiom = 0, 0, 0  # Placeholder for adaptive assessment
+                
+                # Placeholder error feedback
+                fluency = 80.0
+                collocations = 75.0
+                idioms = 70.0
+
                 save_submission(st.session_state.username, tid, text, mt_text, post_edit,
                                 bleu, chrf, semantic, edits, effort,
-                                fluency, colloc, idiom)
+                                fluency, collocations, idioms)
                 st.success("Submission saved!")
 
+    # Progress radar
+    st.subheader("📊 My Progress")
+    # Dummy metrics aggregation
+    metrics = {
+        "BLEU": 70,
+        "chrF": 65,
+        "Semantic": 80,
+        "Effort": 20,
+        "Edits": 5,
+        "Fluency": 80,
+        "Collocations": 75,
+        "Idioms": 70
+    }
+    fig = plot_radar_for_student_metrics(metrics)
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Practice Queue
     st.subheader("🗂 My Practice Queue")
     queue = get_student_practice(st.session_state.username)
     if not queue:
@@ -92,10 +105,6 @@ def student_dashboard():
                 st.session_state.active_practice = None
                 st.experimental_rerun()
 
-# -----------------------------
-# INSTRUCTOR DASHBOARD
-# -----------------------------
-
 def instructor_dashboard():
     st.sidebar.markdown(f"👤 Logged in as: {st.session_state.username} ({st.session_state.role})")
     st.sidebar.button("Logout", on_click=lambda: st.session_state.clear())
@@ -109,25 +118,20 @@ def instructor_dashboard():
         add_practice_item(cat, prompt, ref)
         st.success("Practice added!")
 
-    st.subheader("🔧 Assign Practices")
+    st.subheader("🔧 All Practices")
     practices = get_practice_bank()
     st.table(practices)
-
-# -----------------------------
-# ADMIN DASHBOARD
-# -----------------------------
 
 def admin_dashboard():
     st.sidebar.markdown(f"👤 Logged in as: {st.session_state.username} ({st.session_state.role})")
     st.sidebar.button("Logout", on_click=lambda: st.session_state.clear())
 
     st.title("🛠 Admin Dashboard")
-    st.info("Admin features will be added here")
+    st.info("Admin features like thresholds can be added here.")
 
 # -----------------------------
 # MAIN
 # -----------------------------
-
 def main():
     init_db()
     if "username" not in st.session_state:
