@@ -1,15 +1,6 @@
-# -----------------------------
-# ADAPTIVE FEEDBACK
-# -----------------------------
-
 def generate_feedback(bleu, chrf, semantic, edits, effort):
-    """
-    Generate textual feedback based on student performance.
-    Scores are percentages (0-100).
-    """
     feedback = []
 
-    # BLEU feedback
     if bleu > 70:
         feedback.append("Great word choice and accurate translation!")
     elif bleu > 40:
@@ -17,7 +8,6 @@ def generate_feedback(bleu, chrf, semantic, edits, effort):
     else:
         feedback.append("Consider revising key words and sentence structure.")
 
-    # chrF feedback
     if chrf > 70:
         feedback.append("Excellent character-level consistency.")
     elif chrf > 40:
@@ -25,7 +15,6 @@ def generate_feedback(bleu, chrf, semantic, edits, effort):
     else:
         feedback.append("Pay attention to spelling, morphology, and word forms.")
 
-    # Semantic feedback
     if semantic > 70:
         feedback.append("Meaning is well-preserved.")
     elif semantic > 40:
@@ -33,7 +22,6 @@ def generate_feedback(bleu, chrf, semantic, edits, effort):
     else:
         feedback.append("The translation diverges from the original meaning.")
 
-    # Edits / Effort feedback
     if edits < 20 and effort < 20:
         feedback.append("Minimal edits required — very efficient!")
     elif edits < 50:
@@ -43,12 +31,7 @@ def generate_feedback(bleu, chrf, semantic, edits, effort):
 
     return "\n".join(feedback)
 
-
 def recommend_practice(metrics):
-    """
-    Suggest practice items based on weakest area.
-    metrics: dict with BLEU, chrF, Semantic, Edits, Effort
-    """
     weakest = min(metrics, key=metrics.get)
     if weakest in ["BLEU", "Semantic"]:
         return "Focus on translating sentence meaning and word choice."
