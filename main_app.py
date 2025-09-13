@@ -1,3 +1,5 @@
+import nltk
+nltk.download('punkt')
 import streamlit as st
 from datetime import datetime
 from db_utils import (
@@ -187,3 +189,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
