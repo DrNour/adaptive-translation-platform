@@ -1,5 +1,4 @@
 import streamlit as st
-from datetime import datetime
 from db_utils import (
     init_db, register_user, validate_login, get_user_role,
     get_adaptive_tasks, save_submission, get_student_practice,
@@ -9,7 +8,7 @@ from metrics_utils import (
     compute_bleu_chrf, compute_semantic_score, compute_edits_effort,
     compute_error_pattern, plot_radar_for_student_metrics
 )
-from ai_utils import provide_motivational_feedback, suggest_translation_corrections
+from ai_utils import provide_motivational_feedback
 
 # -----------------------------
 # LOGIN & REGISTER
@@ -44,10 +43,10 @@ def show_register():
 def student_dashboard():
     st.sidebar.markdown(f"👤 Logged in as: {st.session_state.username} ({st.session_state.role})")
     st.sidebar.button("Logout", on_click=lambda: st.session_state.clear())
-
+    
     st.title("🎓 Student Dashboard")
 
-    # Initialize session state keys safely
+    # Initialize session state
     if "active_practice" not in st.session_state:
         st.session_state.active_practice = None
     if "clicked_task_button" not in st.session_state:
@@ -55,18 +54,14 @@ def student_dashboard():
     if "clicked_practice_button" not in st.session_state:
         st.session_state.clicked_practice_button = None
 
-    # -----------------------------
-    # Translation Tasks
-    # -----------------------------
+    # Translation tasks
     st.subheader("📌 Translation Tasks")
     tasks = get_adaptive_tasks(st.session_state.username)
-    if not tasks:
-        st.info("No tasks assigned yet.")
-    else:
+    if tasks:
         for tid, text in tasks:
             st.markdown(f"**Task {tid}:** {text}")
-            mt_text = st.text_area("Machine Translation (for comparison)", key=f"mt_{tid}")
-            post_edit = st.text_area("Your Translation / Post-edit", key=f"pe_{tid}")
+            mt_text = st.text_area("Machine Translation", key=f"mt_{tid}")
+            post_edit = st.text_area("Your Translation", key=f"pe_{tid}")
             button_key = f"submit_task_{tid}"
             if st.button("Submit Task", key=button_key):
                 bleu, chrf = compute_bleu_chrf(text, post_edit)
@@ -76,25 +71,21 @@ def student_dashboard():
                                 bleu, chrf, semantic, edits, effort)
                 st.session_state.clicked_task_button = tid
 
-    # -----------------------------
-    # Progress Radar
-    # -----------------------------
+    # Student progress radar
     st.subheader("📊 My Progress")
     pattern = compute_error_pattern(st.session_state.username)
     if pattern:
         st.json(pattern)
         fig = plot_radar_for_student_metrics({
-            "BLEU": pattern.get("avg_bleu", 0),
-            "chrF": pattern.get("avg_chrf", 0),
-            "Semantic": pattern.get("avg_semantic", 0),
-            "Effort": min(100, pattern.get("avg_effort", 0)),
-            "Edits": min(100, pattern.get("avg_edits", 0))
+            "BLEU": pattern.get("avg_bleu",0),
+            "chrF": pattern.get("avg_chrf",0),
+            "Semantic": pattern.get("avg_semantic",0),
+            "Effort": min(100, pattern.get("avg_effort",0)),
+            "Edits": min(100, pattern.get("avg_edits",0))
         })
         st.plotly_chart(fig, use_container_width=True)
 
-    # -----------------------------
-    # Practice Queue
-    # -----------------------------
+    # Practice queue
     assign_practice_for_student(st.session_state.username)
     queue = get_student_practice(st.session_state.username)
     if queue:
@@ -108,7 +99,7 @@ def student_dashboard():
             if status == "completed":
                 st.caption(f"Completed: {completed_at}")
 
-        # Display active practice if selected
+        # Active practice
         active = st.session_state.active_practice
         if active:
             sp_id, prompt, ref = active
@@ -118,13 +109,12 @@ def student_dashboard():
             if st.button("Submit Practice", key=submit_key):
                 mark_practice_completed(sp_id, ans, st.session_state.username)
                 st.success("Practice completed!")
+                provide_motivational_feedback(st.session_state.username, sp_id)
                 st.session_state.active_practice = None
                 st.session_state.clicked_practice_button = sp_id
 
-    # -----------------------------
     # Trigger rerun safely
-    # -----------------------------
-    if st.session_state.clicked_task_button is not None or st.session_state.clicked_practice_button is not None:
+    if st.session_state.clicked_task_button or st.session_state.clicked_practice_button:
         st.session_state.clicked_task_button = None
         st.session_state.clicked_practice_button = None
         st.experimental_rerun()
@@ -150,24 +140,18 @@ def instructor_dashboard():
 # -----------------------------
 def main():
     init_db()
-
-    # Initialize session state safely
-    for key in ["username", "role", "active_practice", "clicked_task_button", "clicked_practice_button"]:
+    for key in ["username","role","active_practice","clicked_task_button","clicked_practice_button"]:
         if key not in st.session_state:
             st.session_state[key] = None
 
     if st.session_state.username is None:
         tab1, tab2 = st.tabs(["Login", "Register"])
-        with tab1:
-            show_login()
-        with tab2:
-            show_register()
+        with tab1: show_login()
+        with tab2: show_register()
     else:
         role = st.session_state.role
-        if role == "Student":
-            student_dashboard()
-        elif role == "Instructor":
-            instructor_dashboard()
+        if role == "Student": student_dashboard()
+        elif role == "Instructor": instructor_dashboard()
 
 if __name__ == "__main__":
     main()
