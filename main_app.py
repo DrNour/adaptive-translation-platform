@@ -1,10 +1,11 @@
 import streamlit as st
-import sqlite3
 from datetime import datetime
 from db_utils import (
     init_db, register_user, validate_login, get_user_role,
-    get_tasks, save_submission, get_student_practice,
-    mark_practice_completed
+    save_submission, get_student_practice,
+    mark_practice_completed, update_points_and_streak,
+    assign_practice_for_student, add_practice_item, get_leaderboard,
+    get_adaptive_tasks
 )
 from metrics_utils import (
     compute_bleu_chrf, compute_semantic_score, compute_edits_effort,
@@ -21,8 +22,10 @@ def show_login():
     password = st.text_input("Password", type="password")
     if st.button("Login"):
         if validate_login(username, password):
+            role = get_user_role(username)
             st.session_state.username = username
-            st.session_state.role = get_user_role(username)
+            st.session_state.role = role
+            st.success(f"Logged in as {username} ({role})")
             st.experimental_rerun()
         else:
             st.error("Invalid login")
@@ -40,7 +43,7 @@ def show_register():
             st.error("Username already exists.")
 
 # -----------------------------
-# DASHBOARDS
+# STUDENT DASHBOARD
 # -----------------------------
 def student_dashboard():
     st.sidebar.markdown(f"👤 {st.session_state.username} ({st.session_state.role})")
@@ -49,27 +52,24 @@ def student_dashboard():
     st.title("🎓 Student Dashboard")
 
     # -----------------------------
-    # Display Points & Streak
+    # Gamification: Points & Streak
     # -----------------------------
-    conn = sqlite3.connect("users.db")
-    c = conn.cursor()
-    c.execute("SELECT points, streak FROM users WHERE username=?", (st.session_state.username,))
-    points, streak = c.fetchone()
-    conn.close()
+    points, streak = update_points_and_streak(st.session_state.username, 0)
     st.subheader("🏅 My Gamification Stats")
     st.metric("Points", points)
     st.metric("Streak (days)", streak)
     st.info(provide_motivational_feedback(points, streak))
 
     # -----------------------------
-    # Tasks
+    # Adaptive Practice Assignment
+    # -----------------------------
+    assign_practice_for_student(st.session_state.username)
+
+    # -----------------------------
+    # Adaptive Translation Tasks
     # -----------------------------
     st.subheader("📌 Translation Tasks")
-    conn = sqlite3.connect("users.db")
-    c = conn.cursor()
-    c.execute("SELECT task_id, text FROM tasks")
-    tasks = c.fetchall()
-    conn.close()
+    tasks = get_adaptive_tasks(st.session_state.username)
     if not tasks:
         st.info("No tasks assigned yet.")
     else:
@@ -83,8 +83,11 @@ def student_dashboard():
                 edits, effort = compute_edits_effort(mt_text, post_edit)
                 save_submission(st.session_state.username, tid, text, mt_text, post_edit,
                                 bleu, chrf, semantic, edits, effort)
-                st.success("Submission saved!")
-                feedback = suggest_translation_corrections(text, post_edit)
+                points, streak = update_points_and_streak(st.session_state.username, 10)
+                st.success("Submission saved! Points +10 awarded.")
+                # Feedback
+                pattern = compute_error_pattern(st.session_state.username)
+                feedback = suggest_translation_corrections(text, post_edit, pattern)
                 for f in feedback:
                     st.warning(f"💡 {f}")
                 st.experimental_rerun()
@@ -106,14 +109,14 @@ def student_dashboard():
             if status == "completed":
                 st.caption(f"Completed: {completed_at}")
 
-        # Active practice submission
         if "active_practice" in st.session_state and st.session_state.active_practice:
             sp_id, prompt, ref = st.session_state.active_practice
             st.text_area("Practice prompt", prompt, disabled=True)
             ans = st.text_area("Your translation", key=f"prac_{sp_id}")
             if st.button("Submit Practice"):
                 mark_practice_completed(sp_id, ans, st.session_state.username)
-                st.success("Practice completed!")
+                points, streak = update_points_and_streak(st.session_state.username, 5)
+                st.success("Practice completed! Points +5 awarded.")
                 st.session_state.active_practice = None
                 st.experimental_rerun()
 
@@ -134,7 +137,7 @@ def student_dashboard():
         st.plotly_chart(fig, use_container_width=True)
 
 # -----------------------------
-# Instructor Dashboard
+# INSTRUCTOR DASHBOARD
 # -----------------------------
 def instructor_dashboard():
     st.sidebar.markdown(f"👤 {st.session_state.username} ({st.session_state.role})")
@@ -147,28 +150,23 @@ def instructor_dashboard():
     prompt = st.text_area("Practice prompt")
     ref = st.text_area("Reference translation")
     if st.button("Add Practice"):
-        conn = sqlite3.connect("users.db")
-        c = conn.cursor()
-        c.execute("INSERT INTO practice_bank (category, prompt, reference) VALUES (?, ?, ?)", (cat, prompt, ref))
-        conn.commit()
-        conn.close()
+        add_practice_item(cat, prompt, ref)
         st.success("Practice added!")
 
     st.subheader("🏆 Leaderboard")
-    conn = sqlite3.connect("users.db")
-    c = conn.cursor()
-    c.execute("SELECT username, points, streak FROM users WHERE role='Student' ORDER BY points DESC")
-    leaderboard = c.fetchall()
-    conn.close()
+    leaderboard = get_leaderboard()
     st.table(leaderboard)
 
 # -----------------------------
-# MAIN
+# MAIN APP
 # -----------------------------
 def main():
     init_db()
+
     if "username" not in st.session_state:
         st.session_state.username = None
+    if "role" not in st.session_state:
+        st.session_state.role = None
 
     if st.session_state.username is None:
         tab1, tab2 = st.tabs(["Login", "Register"])
@@ -178,7 +176,9 @@ def main():
             show_register()
     else:
         role = st.session_state.role
-        if role.lower() == "student":
+        if role is None:
+            st.error("Role is not set. Please log in again.")
+        elif role.lower() == "student":
             student_dashboard()
         elif role.lower() == "instructor":
             instructor_dashboard()
