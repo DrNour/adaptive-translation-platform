@@ -1,3 +1,21 @@
+import sqlite3
+
+# Ensure Admin account exists
+conn = sqlite3.connect("app.db")
+c = conn.cursor()
+c.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    username TEXT PRIMARY KEY,
+    password TEXT,
+    role TEXT,
+    approved INTEGER DEFAULT 0
+)
+""")
+c.execute("INSERT OR REPLACE INTO users (username, password, role, approved) VALUES (?,?,?,?)",
+          ("Nour", "123", "Admin", 1))
+conn.commit()
+conn.close()
+
 import streamlit as st
 import pandas as pd
 import os
@@ -172,3 +190,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
