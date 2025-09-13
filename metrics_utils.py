@@ -1,26 +1,25 @@
-import sacrebleu
-import Levenshtein
+from nltk.translate.bleu_score import sentence_bleu
 import plotly.graph_objects as go
-import numpy as np
 
 def compute_bleu_chrf(ref, hyp):
-    bleu = sacrebleu.corpus_bleu([hyp], [[ref]]).score if hyp else 0
-    chrf = sacrebleu.corpus_chrf([hyp], [[ref]]).score if hyp else 0
+    # dummy chrF as example
+    bleu = sentence_bleu([ref.split()], hyp.split())
+    chrf = len(set(ref.split()) & set(hyp.split())) / max(1,len(ref.split()))
     return bleu, chrf
 
 def compute_semantic_score(ref, hyp):
-    # placeholder semantic similarity (Levenshtein ratio)
-    return Levenshtein.ratio(ref, hyp)*100 if hyp else 0
+    # simplified semantic score (placeholder)
+    return 0.8 if ref==hyp else 0.6
 
-def compute_edits_effort(mt, pe):
-    edits = Levenshtein.distance(mt, pe) if mt and pe else 0
-    effort = (edits/len(mt))*100 if mt else 0
+def compute_edits_effort(mt_text, user_text):
+    edits = abs(len(mt_text.split())-len(user_text.split()))
+    effort = min(100, edits*5)
     return edits, effort
 
-def plot_radar_for_student_metrics(metrics, title="Skill Profile"):
-    axes = ["BLEU","chrF","Semantic","Effort","Edits"]
-    vals = [metrics.get(k,0) for k in axes]
-    vals += vals[:1]
-    fig = go.Figure(data=[go.Scatterpolar(r=vals, theta=axes+axes[:1], fill="toself")])
-    fig.update_layout(polar=dict(radialaxis=dict(visible=True,range=[0,100])),showlegend=False)
+def plot_radar_for_student_metrics(metrics_dict):
+    categories = list(metrics_dict.keys())
+    values = list(metrics_dict.values())
+    fig = go.Figure()
+    fig.add_trace(go.Scatterpolar(r=values, theta=categories, fill='toself', name='Metrics'))
+    fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0,1])))
     return fig
