@@ -47,14 +47,16 @@ def student_dashboard():
 
     st.title("🎓 Student Dashboard")
 
-    # Initialize rerun flag
+    # Initialize session state keys safely
     if "active_practice" not in st.session_state:
         st.session_state.active_practice = None
-    if "rerun_flag" not in st.session_state:
-        st.session_state.rerun_flag = False
+    if "clicked_task_button" not in st.session_state:
+        st.session_state.clicked_task_button = None
+    if "clicked_practice_button" not in st.session_state:
+        st.session_state.clicked_practice_button = None
 
     # -----------------------------
-    # Tasks
+    # Translation Tasks
     # -----------------------------
     st.subheader("📌 Translation Tasks")
     tasks = get_adaptive_tasks(st.session_state.username)
@@ -65,16 +67,17 @@ def student_dashboard():
             st.markdown(f"**Task {tid}:** {text}")
             mt_text = st.text_area("Machine Translation (for comparison)", key=f"mt_{tid}")
             post_edit = st.text_area("Your Translation / Post-edit", key=f"pe_{tid}")
-            if st.button(f"Submit Task {tid}"):
+            button_key = f"submit_task_{tid}"
+            if st.button("Submit Task", key=button_key):
                 bleu, chrf = compute_bleu_chrf(text, post_edit)
                 semantic = compute_semantic_score(text, post_edit)
                 edits, effort = compute_edits_effort(mt_text, post_edit)
                 save_submission(st.session_state.username, tid, text, mt_text, post_edit,
                                 bleu, chrf, semantic, edits, effort)
-                st.success("Submission saved!")
+                st.session_state.clicked_task_button = tid
 
     # -----------------------------
-    # Error pattern + radar chart
+    # Progress Radar
     # -----------------------------
     st.subheader("📊 My Progress")
     pattern = compute_error_pattern(st.session_state.username)
@@ -90,36 +93,40 @@ def student_dashboard():
         st.plotly_chart(fig, use_container_width=True)
 
     # -----------------------------
-    # Practice queue
+    # Practice Queue
     # -----------------------------
-    assign_practice_for_student(st.session_state.username)  # assign new items if available
+    assign_practice_for_student(st.session_state.username)
     queue = get_student_practice(st.session_state.username)
-
     if queue:
         for sp_id, pid, cat, prompt, ref, status, assigned_at, completed_at in queue:
             st.markdown(f"**[{status.upper()}]** ({cat}) {prompt}")
             if status == "recommended":
-                if st.button(f"Do Practice {sp_id}"):
+                button_key = f"do_practice_{sp_id}"
+                if st.button("Do Practice", key=button_key):
                     st.session_state.active_practice = (sp_id, prompt, ref)
-                    st.session_state.rerun_flag = True
+                    st.session_state.clicked_practice_button = sp_id
+            if status == "completed":
+                st.caption(f"Completed: {completed_at}")
 
-        # Active practice
-        active = st.session_state.get("active_practice")
+        # Display active practice if selected
+        active = st.session_state.active_practice
         if active:
             sp_id, prompt, ref = active
             st.text_area("Practice prompt", prompt, disabled=True)
             ans = st.text_area("Your translation", key=f"prac_{sp_id}")
-            if st.button("Submit Practice"):
+            submit_key = f"submit_practice_{sp_id}"
+            if st.button("Submit Practice", key=submit_key):
                 mark_practice_completed(sp_id, ans, st.session_state.username)
                 st.success("Practice completed!")
                 st.session_state.active_practice = None
-                st.session_state.rerun_flag = True
+                st.session_state.clicked_practice_button = sp_id
 
     # -----------------------------
     # Trigger rerun safely
     # -----------------------------
-    if st.session_state.rerun_flag:
-        st.session_state.rerun_flag = False
+    if st.session_state.clicked_task_button is not None or st.session_state.clicked_practice_button is not None:
+        st.session_state.clicked_task_button = None
+        st.session_state.clicked_practice_button = None
         st.experimental_rerun()
 
 # -----------------------------
@@ -145,7 +152,7 @@ def main():
     init_db()
 
     # Initialize session state safely
-    for key in ["username", "role", "active_practice", "rerun_flag"]:
+    for key in ["username", "role", "active_practice", "clicked_task_button", "clicked_practice_button"]:
         if key not in st.session_state:
             st.session_state[key] = None
 
