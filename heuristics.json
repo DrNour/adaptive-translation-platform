@@ -1,7 +1,0 @@
-{
-  "semantic_threshold": 65,
-  "bleu_threshold": 30,
-  "chrf_threshold": 40,
-  "effort_high": 50,
-  "edit_high": 40
-}
