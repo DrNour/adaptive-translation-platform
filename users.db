@@ -1,0 +1,15 @@
+def init_db():
+    conn = sqlite3.connect("users.db")
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY,
+            password TEXT,
+            role TEXT
+        )
+    ''')
+    # Ensure admin exists
+    c.execute("INSERT OR IGNORE INTO users (username, password, role) VALUES (?, ?, ?)",
+              ("admin", "admin_password_here", "admin"))
+    conn.commit()
+    conn.close()
