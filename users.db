@@ -1,14 +1,85 @@
-def init_db():
+from datetime import datetime, timedelta
+
+# -----------------------------
+# Gamification: Points & Streaks
+# -----------------------------
+
+def add_points(username, points):
+    """
+    Add points to a student.
+    """
     conn = sqlite3.connect("users.db")
     c = conn.cursor()
-    # Add points column if it doesn’t exist
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            username TEXT PRIMARY KEY,
-            password TEXT,
-            role TEXT,
-            points INTEGER DEFAULT 0
-        )
-    ''')
+    c.execute("UPDATE users SET points = points + ? WHERE username = ?", (points, username))
     conn.commit()
     conn.close()
+
+def update_streak(username):
+    """
+    Update streak based on last completed practice or task.
+    A streak increases if the student completes at least one activity per day consecutively.
+    """
+    conn = sqlite3.connect("users.db")
+    c = conn.cursor()
+
+    # Get last completion date
+    c.execute("""
+        SELECT MAX(completed_at) FROM student_practice
+        WHERE username = ? AND completed_at IS NOT NULL
+    """, (username,))
+    last_done = c.fetchone()[0]
+
+    if last_done:
+        last_date = datetime.fromisoformat(last_done).date()
+        today = datetime.now().date()
+        delta = (today - last_date).days
+
+        if delta == 1:  # consecutive day
+            c.execute("UPDATE users SET streak = streak + 1 WHERE username = ?", (username,))
+        elif delta > 1:  # missed days
+            c.execute("UPDATE users SET streak = 1 WHERE username = ?", (username,))
+        # else delta == 0, same day, no change
+    else:
+        c.execute("UPDATE users SET streak = 1 WHERE username = ?", (username,))
+
+    conn.commit()
+    conn.close()
+
+# -----------------------------
+# Record practice completion
+# -----------------------------
+def mark_practice_completed(sp_id, student_answer, username):
+    conn = sqlite3.connect("users.db")
+    c = conn.cursor()
+    now = datetime.now().isoformat()
+    c.execute("""
+        UPDATE student_practice
+        SET status = ?, completed_at = ?
+        WHERE sp_id = ?
+    """, ("completed", now, sp_id))
+    conn.commit()
+    conn.close()
+
+    # Update points and streak
+    add_points(username, 10)        # each practice = 10 points
+    update_streak(username)
+
+# -----------------------------
+# Record task submission
+# -----------------------------
+def save_submission(username, task_id, original_text, mt_text, post_edit,
+                    bleu, chrf, semantic, edits, effort):
+    conn = sqlite3.connect("users.db")
+    c = conn.cursor()
+    now = datetime.now().isoformat()
+    c.execute("""
+        INSERT INTO submissions (username, task_id, original_text, mt_text, post_edit,
+                                 bleu, chrf, semantic, edits, effort, submitted_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (username, task_id, original_text, mt_text, post_edit, bleu, chrf, semantic, edits, effort, now))
+    conn.commit()
+    conn.close()
+
+    # Update points and streak
+    add_points(username, 20)       # each task = 20 points
+    update_streak(username)
