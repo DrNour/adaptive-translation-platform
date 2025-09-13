@@ -7,7 +7,7 @@ from nltk.translate.bleu_score import sentence_bleu
 import plotly.graph_objects as go
 
 # -----------------------------
-# DATABASE UTILS (formerly db_utils.py)
+# DATABASE UTILS
 # -----------------------------
 DB_PATH = "adaptive_learning.db"
 
@@ -57,6 +57,12 @@ def init_db():
         assigned_at TEXT,
         completed_at TEXT,
         bleu REAL, chrf REAL, semantic REAL, edits REAL, effort REAL, feedback TEXT
+    )''')
+    # Student progress for gamification
+    c.execute('''CREATE TABLE IF NOT EXISTS student_progress(
+        username TEXT PRIMARY KEY,
+        points INTEGER DEFAULT 0,
+        badges TEXT DEFAULT ''
     )''')
     conn.commit()
     conn.close()
@@ -138,14 +144,6 @@ def get_student_practice(username):
     conn.close()
     return res
 
-def mark_practice_completed(sp_id,ans,username,bleu=0,chrf=0,semantic=0,edits=0,effort=0,feedback=""):
-    conn=sqlite3.connect(DB_PATH)
-    c=conn.cursor()
-    c.execute('''UPDATE student_practice SET status='completed',completed_at=?,bleu=?,chrf=?,semantic=?,edits=?,effort=?,feedback=?
-                 WHERE id=?''',(str(datetime.now()),bleu,chrf,semantic,edits,effort,feedback,sp_id))
-    conn.commit()
-    conn.close()
-
 def compute_error_pattern(username):
     submissions=get_submissions(username)
     if not submissions: return None
@@ -157,7 +155,7 @@ def compute_error_pattern(username):
     return {"avg_bleu":avg_bleu,"avg_chrf":avg_chrf,"avg_semantic":avg_semantic,"avg_edits":avg_edits,"avg_effort":avg_effort}
 
 # -----------------------------
-# AI UTILS (formerly ai_utils.py)
+# AI UTILS
 # -----------------------------
 def add_ai_practices_to_queue(username,num_exercises=3):
     practices = get_practice_bank()
@@ -172,7 +170,7 @@ def add_ai_practices_to_queue(username,num_exercises=3):
     conn.close()
 
 # -----------------------------
-# METRICS UTILS (formerly metrics_utils.py)
+# METRICS UTILS
 # -----------------------------
 def compute_bleu_chrf(ref,hyp):
     bleu=sentence_bleu([ref.split()],hyp.split())
@@ -194,6 +192,39 @@ def plot_radar_for_student_metrics(metrics_dict):
     fig.add_trace(go.Scatterpolar(r=values, theta=categories, fill='toself', name='Metrics'))
     fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0,1])))
     return fig
+
+# -----------------------------
+# GAMIFICATION UTILS
+# -----------------------------
+def mark_practice_completed(sp_id, ans, username, bleu=0,chrf=0,semantic=0,edits=0,effort=0,feedback=""):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    # Mark practice completed
+    c.execute('''UPDATE student_practice SET status='completed',completed_at=?,bleu=?,chrf=?,semantic=?,edits=?,effort=?,feedback=?
+                 WHERE id=?''', (str(datetime.now()), bleu, chrf, semantic, edits, effort, feedback, sp_id))
+    # Points and badges
+    c.execute("SELECT points,badges FROM student_progress WHERE username=?", (username,))
+    res = c.fetchone()
+    if res:
+        points, badges = res
+        points += 10
+        badges_list = badges.split(',') if badges else []
+    else:
+        points = 10
+        badges_list = []
+
+    # Check badges
+    c.execute("SELECT COUNT(*) FROM student_practice WHERE username=? AND status='completed'", (username,))
+    completed_count = c.fetchone()[0]
+    if completed_count == 1 and "First Practice" not in badges_list:
+        badges_list.append("First Practice")
+    if completed_count == 5 and "5 Practices Completed" not in badges_list:
+        badges_list.append("5 Practices Completed")
+
+    c.execute("INSERT OR REPLACE INTO student_progress(username,points,badges) VALUES (?,?,?)",
+              (username, points, ','.join(badges_list)))
+    conn.commit()
+    conn.close()
 
 # -----------------------------
 # APP UI
@@ -226,6 +257,9 @@ def student_dashboard():
     st.sidebar.markdown(f"👤 Logged in as: {st.session_state.username} ({st.session_state.role})")
     st.sidebar.button("Logout", on_click=lambda: st.session_state.clear())
     st.title("🎓 Student Dashboard")
+
+    # Tasks
+    st.subheader("📌 Translation Tasks")
     tasks=get_tasks()
     if not tasks: st.info("No tasks assigned yet.")
     else:
@@ -240,6 +274,7 @@ def student_dashboard():
                 save_submission(st.session_state.username,tid,text,mt_text,post_edit,bleu,chrf,semantic,edits,effort)
                 st.success("Submission saved!")
 
+    # Progress radar
     st.subheader("📊 My Progress")
     pattern=compute_error_pattern(st.session_state.username)
     if pattern:
@@ -253,27 +288,54 @@ def student_dashboard():
         })
         st.plotly_chart(fig,use_container_width=True)
 
+    # Practice queue
     st.subheader("🗂 My Practice Queue")
     queue=get_student_practice(st.session_state.username)
-    if not queue: st.info("No practice items yet.")
-    else:
-        for sp_id,pid,cat,prompt,ref,status,assigned_at,completed_at in queue:
-            st.markdown(f"**[{status.upper()}]** ({cat}) {prompt}")
-            if status=="recommended":
-                if st.button(f"Do Practice {sp_id}"):
-                    st.session_state.active_practice=(sp_id,prompt,ref)
-                    st.experimental_rerun()
-            if status=="completed":
-                st.caption(f"Completed: {completed_at}")
-        if "active_practice" in st.session_state and st.session_state.active_practice:
-            sp_id,prompt,ref=st.session_state.active_practice
-            st.text_area("Practice prompt", prompt, disabled=True)
-            ans=st.text_area("Your translation", key=f"prac_{sp_id}")
-            if st.button("Submit Practice"):
-                mark_practice_completed(sp_id,ans,st.session_state.username)
-                st.success("Practice completed!")
-                st.session_state.active_practice=None
+    if not queue: st.info("No practice items yet. Adding AI-generated exercises...")
+    if not queue:
+        add_ai_practices_to_queue(st.session_state.username)
+        queue=get_student_practice(st.session_state.username)
+    for sp_id,pid,cat,prompt,ref,status,assigned_at,completed_at in queue:
+        st.markdown(f"**[{status.upper()}]** ({cat}) {prompt}")
+        if status=="recommended":
+            if st.button(f"Do Practice {sp_id}"):
+                st.session_state.active_practice=(sp_id,prompt,ref)
                 st.experimental_rerun()
+        if status=="completed":
+            st.caption(f"Completed: {completed_at}")
+
+    if "active_practice" in st.session_state and st.session_state.active_practice:
+        sp_id,prompt,ref=st.session_state.active_practice
+        st.text_area("Practice prompt",prompt,disabled=True)
+        ans=st.text_area("Your translation", key=f"prac_{sp_id}")
+        if st.button("Submit Practice"):
+            mark_practice_completed(sp_id,ans,st.session_state.username)
+            st.success("Practice completed!")
+            st.session_state.active_practice=None
+            st.experimental_rerun()
+
+    # Gamification stats
+    st.subheader("🏆 My Gamification Stats")
+    conn=sqlite3.connect(DB_PATH)
+    c=conn.cursor()
+    c.execute("SELECT points,badges FROM student_progress WHERE username=?",(st.session_state.username,))
+    res=c.fetchone()
+    conn.close()
+    if res:
+        points,badges=res
+        st.markdown(f"**Points:** {points}")
+        st.markdown(f"**Badges:** {badges if badges else 'None'}")
+
+    # Leaderboard
+    st.subheader("🏅 Leaderboard")
+    conn=sqlite3.connect(DB_PATH)
+    c=conn.cursor()
+    c.execute("SELECT username,points FROM student_progress ORDER BY points DESC LIMIT 10")
+    leaders=c.fetchall()
+    conn.close()
+    if leaders:
+        df=pd.DataFrame(leaders,columns=["Username","Points"])
+        st.table(df)
 
 def instructor_dashboard():
     st.sidebar.markdown(f"👤 Logged in as: {st.session_state.username} ({st.session_state.role})")
@@ -286,22 +348,11 @@ def instructor_dashboard():
     if st.button("Add Practice"):
         add_practice_item(cat,prompt,ref)
         st.success("Practice added!")
-    st.subheader("🤖 Generate AI Exercises")
-    if st.button("Generate AI Exercises for All Students"):
-        conn=sqlite3.connect(DB_PATH)
-        c=conn.cursor()
-        c.execute("SELECT username FROM users WHERE role='Student'")
-        students=[r[0] for r in c.fetchall()]
-        conn.close()
-        for s in students: add_ai_practices_to_queue(s)
-        st.success("AI exercises generated!")
 
-# -----------------------------
-# MAIN
-# -----------------------------
 def main():
     init_db()
-    if "username" not in st.session_state: st.session_state.username=None
+    if "username" not in st.session_state:
+        st.session_state.username=None
     if st.session_state.username is None:
         tab1,tab2=st.tabs(["Login","Register"])
         with tab1: show_login()
@@ -310,7 +361,6 @@ def main():
         role=st.session_state.role
         if role=="Student": student_dashboard()
         elif role=="Instructor": instructor_dashboard()
-        else: st.info("Unknown role or admin features not implemented yet")
 
 if __name__=="__main__":
     main()
