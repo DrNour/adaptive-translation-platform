@@ -21,7 +21,7 @@ def show_login():
         if validate_login(username, password):
             st.session_state.username = username
             st.session_state.role = get_user_role(username)
-            st.session_state.rerun_now = True   # set flag for safe rerun
+            st.session_state.rerun_needed = True  # Safe rerun
         else:
             st.error("Invalid login")
 
@@ -43,15 +43,15 @@ def show_register():
 def student_dashboard():
     st.sidebar.markdown(f"👤 Logged in as: {st.session_state.username} ({st.session_state.role})")
     st.sidebar.button("Logout", on_click=lambda: st.session_state.clear())
-    
+
     st.title("🎓 Student Dashboard")
 
-    # Initialize session state
-    if "active_practice" not in st.session_state:
+    # Initialize session flags
+    if st.session_state.active_practice is None:
         st.session_state.active_practice = None
-    if "clicked_task_button" not in st.session_state:
+    if st.session_state.clicked_task_button is None:
         st.session_state.clicked_task_button = None
-    if "clicked_practice_button" not in st.session_state:
+    if st.session_state.clicked_practice_button is None:
         st.session_state.clicked_practice_button = None
 
     # Translation tasks
@@ -62,16 +62,15 @@ def student_dashboard():
             st.markdown(f"**Task {tid}:** {text}")
             mt_text = st.text_area("Machine Translation", key=f"mt_{tid}")
             post_edit = st.text_area("Your Translation", key=f"pe_{tid}")
-            button_key = f"submit_task_{tid}"
-            if st.button("Submit Task", key=button_key):
+            if st.button("Submit Task", key=f"submit_task_{tid}"):
                 bleu, chrf = compute_bleu_chrf(text, post_edit)
                 semantic = compute_semantic_score(text, post_edit)
                 edits, effort = compute_edits_effort(mt_text, post_edit)
                 save_submission(st.session_state.username, tid, text, mt_text, post_edit,
                                 bleu, chrf, semantic, edits, effort)
-                st.session_state.clicked_task_button = tid
+                st.session_state.rerun_needed = True
 
-    # Student progress radar
+    # Progress radar chart
     st.subheader("📊 My Progress")
     pattern = compute_error_pattern(st.session_state.username)
     if pattern:
@@ -92,10 +91,9 @@ def student_dashboard():
         for sp_id, pid, cat, prompt, ref, status, assigned_at, completed_at in queue:
             st.markdown(f"**[{status.upper()}]** ({cat}) {prompt}")
             if status == "recommended":
-                button_key = f"do_practice_{sp_id}"
-                if st.button("Do Practice", key=button_key):
+                if st.button("Do Practice", key=f"do_practice_{sp_id}"):
                     st.session_state.active_practice = (sp_id, prompt, ref)
-                    st.session_state.clicked_practice_button = sp_id
+                    st.session_state.rerun_needed = True
             if status == "completed":
                 st.caption(f"Completed: {completed_at}")
 
@@ -105,18 +103,16 @@ def student_dashboard():
             sp_id, prompt, ref = active
             st.text_area("Practice prompt", prompt, disabled=True)
             ans = st.text_area("Your translation", key=f"prac_{sp_id}")
-            submit_key = f"submit_practice_{sp_id}"
-            if st.button("Submit Practice", key=submit_key):
+            if st.button("Submit Practice", key=f"submit_practice_{sp_id}"):
                 mark_practice_completed(sp_id, ans, st.session_state.username)
                 st.success("Practice completed!")
                 provide_motivational_feedback(st.session_state.username, sp_id)
                 st.session_state.active_practice = None
-                st.session_state.clicked_practice_button = sp_id
+                st.session_state.rerun_needed = True
 
-    # Trigger rerun safely
-    if st.session_state.clicked_task_button or st.session_state.clicked_practice_button:
-        st.session_state.clicked_task_button = None
-        st.session_state.clicked_practice_button = None
+    # Safe rerun after task/practice actions
+    if st.session_state.rerun_needed:
+        st.session_state.rerun_needed = False
         st.experimental_rerun()
 
 # -----------------------------
@@ -136,17 +132,18 @@ def instructor_dashboard():
         st.success("Practice added!")
 
 # -----------------------------
-# MAIN
+# MAIN APP ENTRY
 # -----------------------------
 def main():
     init_db()
-    for key in ["username","role","active_practice","clicked_task_button","clicked_practice_button","rerun_now"]:
+
+    # Initialize all session state variables safely
+    default_keys = ["username", "role", "active_practice",
+                    "clicked_task_button", "clicked_practice_button",
+                    "rerun_needed"]
+    for key in default_keys:
         if key not in st.session_state:
             st.session_state[key] = None
-
-    if st.session_state.rerun_now:
-        st.session_state.rerun_now = False
-        st.experimental_rerun()
 
     if st.session_state.username is None:
         tab1, tab2 = st.tabs(["Login", "Register"])
@@ -154,8 +151,10 @@ def main():
         with tab2: show_register()
     else:
         role = st.session_state.role
-        if role == "Student": student_dashboard()
-        elif role == "Instructor": instructor_dashboard()
+        if role == "Student":
+            student_dashboard()
+        elif role == "Instructor":
+            instructor_dashboard()
 
 if __name__ == "__main__":
     main()
