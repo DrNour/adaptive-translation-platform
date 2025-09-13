@@ -47,6 +47,12 @@ def student_dashboard():
 
     st.title("🎓 Student Dashboard")
 
+    # Initialize rerun flag
+    if "active_practice" not in st.session_state:
+        st.session_state.active_practice = None
+    if "rerun_flag" not in st.session_state:
+        st.session_state.rerun_flag = False
+
     # -----------------------------
     # Tasks
     # -----------------------------
@@ -88,19 +94,14 @@ def student_dashboard():
     # -----------------------------
     assign_practice_for_student(st.session_state.username)  # assign new items if available
     queue = get_student_practice(st.session_state.username)
-    if not queue:
-        st.info("No practice items yet.")
-    else:
-        if "active_practice" not in st.session_state:
-            st.session_state.active_practice = None
 
+    if queue:
         for sp_id, pid, cat, prompt, ref, status, assigned_at, completed_at in queue:
             st.markdown(f"**[{status.upper()}]** ({cat}) {prompt}")
-            if status == "recommended" and st.button(f"Do Practice {sp_id}"):
-                st.session_state.active_practice = (sp_id, prompt, ref)
-                st.experimental_rerun()
-            if status == "completed":
-                st.caption(f"Completed: {completed_at}")
+            if status == "recommended":
+                if st.button(f"Do Practice {sp_id}"):
+                    st.session_state.active_practice = (sp_id, prompt, ref)
+                    st.session_state.rerun_flag = True
 
         # Active practice
         active = st.session_state.get("active_practice")
@@ -112,7 +113,14 @@ def student_dashboard():
                 mark_practice_completed(sp_id, ans, st.session_state.username)
                 st.success("Practice completed!")
                 st.session_state.active_practice = None
-                st.experimental_rerun()
+                st.session_state.rerun_flag = True
+
+    # -----------------------------
+    # Trigger rerun safely
+    # -----------------------------
+    if st.session_state.rerun_flag:
+        st.session_state.rerun_flag = False
+        st.experimental_rerun()
 
 # -----------------------------
 # INSTRUCTOR DASHBOARD
@@ -137,7 +145,7 @@ def main():
     init_db()
 
     # Initialize session state safely
-    for key in ["username", "role", "active_practice"]:
+    for key in ["username", "role", "active_practice", "rerun_flag"]:
         if key not in st.session_state:
             st.session_state[key] = None
 
