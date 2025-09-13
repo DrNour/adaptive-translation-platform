@@ -1,63 +1,66 @@
-import sqlite3, os, json
+import sqlite3
 from datetime import datetime
 
-DB_FILE = "app.db"
+DB_PATH = "adaptive_learning.db"
 
-def get_conn():
-    return sqlite3.connect(DB_FILE)
-
+# -----------------------------
+# DB INIT
+# -----------------------------
 def init_db():
-    conn = get_conn()
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("""CREATE TABLE IF NOT EXISTS users (
+    # Users
+    c.execute('''CREATE TABLE IF NOT EXISTS users(
         username TEXT PRIMARY KEY,
         password TEXT,
-        role TEXT,
-        approved INTEGER DEFAULT 0
-    )""")
-    c.execute("""CREATE TABLE IF NOT EXISTS tasks (
+        role TEXT
+    )''')
+    # Tasks
+    c.execute('''CREATE TABLE IF NOT EXISTS tasks(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         text TEXT
-    )""")
-    c.execute("""CREATE TABLE IF NOT EXISTS submissions (
+    )''')
+    # Submissions
+    c.execute('''CREATE TABLE IF NOT EXISTS submissions(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT,
         task_id INTEGER,
-        source_text TEXT,
+        original_text TEXT,
         mt_text TEXT,
-        post_edit TEXT,
-        edits INTEGER,
-        effort_percent REAL,
-        bleu REAL,
-        chrf REAL,
-        semantic REAL,
-        created_at TEXT
-    )""")
-    c.execute("""CREATE TABLE IF NOT EXISTS practice_bank (
+        user_text TEXT,
+        bleu REAL, chrf REAL, semantic REAL,
+        edits REAL, effort REAL,
+        feedback TEXT,
+        timestamp TEXT
+    )''')
+    # Practices
+    c.execute('''CREATE TABLE IF NOT EXISTS practices(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         category TEXT,
         prompt TEXT,
-        reference TEXT,
-        created_at TEXT
-    )""")
-    c.execute("""CREATE TABLE IF NOT EXISTS student_practice (
+        reference TEXT
+    )''')
+    # Student-Practice Queue
+    c.execute('''CREATE TABLE IF NOT EXISTS student_practice(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT,
         practice_id INTEGER,
         status TEXT,
         assigned_at TEXT,
-        completed_at TEXT
-    )""")
+        completed_at TEXT,
+        bleu REAL, chrf REAL, semantic REAL, edits REAL, effort REAL, feedback TEXT
+    )''')
     conn.commit()
     conn.close()
 
-# Users
-def register_user(username, password, role):
-    conn = get_conn()
-    c = conn.cursor()
+# -----------------------------
+# USER FUNCTIONS
+# -----------------------------
+def register_user(username,password,role):
+    conn=sqlite3.connect(DB_PATH)
+    c=conn.cursor()
     try:
-        c.execute("INSERT INTO users (username, password, role, approved) VALUES (?,?,?,?)",
-                  (username, password, role, 0 if role!="Admin" else 1))
+        c.execute("INSERT INTO users(username,password,role) VALUES (?,?,?)",(username,password,role))
         conn.commit()
         return True
     except:
@@ -65,125 +68,110 @@ def register_user(username, password, role):
     finally:
         conn.close()
 
-def validate_login(username, password):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT password, approved FROM users WHERE username=?", (username,))
-    row = c.fetchone()
+def validate_login(username,password):
+    conn=sqlite3.connect(DB_PATH)
+    c=conn.cursor()
+    c.execute("SELECT * FROM users WHERE username=? AND password=?",(username,password))
+    res=c.fetchone()
     conn.close()
-    if row and row[0]==password and row[1]==1:
-        return True
-    return False
+    return res is not None
 
 def get_user_role(username):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT role FROM users WHERE username=?", (username,))
-    r = c.fetchone()
+    conn=sqlite3.connect(DB_PATH)
+    c=conn.cursor()
+    c.execute("SELECT role FROM users WHERE username=?",(username,))
+    res=c.fetchone()
     conn.close()
-    return r[0] if r else None
+    return res[0] if res else None
 
-# Tasks
+def get_all_students():
+    conn=sqlite3.connect(DB_PATH)
+    c=conn.cursor()
+    c.execute("SELECT username FROM users WHERE role='Student'")
+    res=[{"username":r[0]} for r in c.fetchall()]
+    conn.close()
+    # For simplicity, you can compute avg metrics from submissions here
+    for s in res:
+        s.update({"avg_bleu":0,"avg_chrf":0,"avg_semantic":0,"avg_edits":0,"avg_effort":0,
+                  "completed_practices":0,"completed_practice_ids":[]})
+    return res
+
+# -----------------------------
+# TASKS AND PRACTICE FUNCTIONS
+# -----------------------------
 def get_tasks():
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT id, text FROM tasks")
-    rows = c.fetchall()
+    conn=sqlite3.connect(DB_PATH)
+    c=conn.cursor()
+    c.execute("SELECT id,text FROM tasks")
+    res=c.fetchall()
     conn.close()
-    return rows
+    return res
 
-def save_submission(username, task_id, src, mt, pe, bleu, chrf, sem, edits, effort):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("""INSERT INTO submissions
-        (username, task_id, source_text, mt_text, post_edit,
-         bleu, chrf, semantic, edits, effort_percent, created_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-        (username, task_id, src, mt, pe, bleu, chrf, sem, edits, effort, datetime.utcnow().isoformat()))
+def save_submission(username,task_id,original_text,mt_text,user_text,bleu,chrf,semantic,edits,effort,feedback):
+    conn=sqlite3.connect(DB_PATH)
+    c=conn.cursor()
+    c.execute('''INSERT INTO submissions(username,task_id,original_text,mt_text,user_text,
+                 bleu,chrf,semantic,edits,effort,feedback,timestamp)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
+              (username,task_id,original_text,mt_text,user_text,bleu,chrf,semantic,edits,effort,str(feedback),str(datetime.now())))
     conn.commit()
     conn.close()
 
 def get_submissions(username):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT * FROM submissions WHERE username=?", (username,))
-    rows = c.fetchall()
+    conn=sqlite3.connect(DB_PATH)
+    c=conn.cursor()
+    c.execute("SELECT bleu,chrf,semantic,edits,effort,timestamp FROM submissions WHERE username=?",(username,))
+    res=[{"bleu":r[0],"chrf":r[1],"semantic":r[2],"edits":r[3],"effort":r[4],"timestamp":r[5]} for r in c.fetchall()]
     conn.close()
-    return rows
-
-# Idioms
-def get_idioms():
-    return []
-
-def add_idiom(cat, exp, meaning):
-    pass
-
-def delete_idiom(id):
-    pass
-
-# Practice bank
-def add_practice_item(cat, prompt, ref):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("INSERT INTO practice_bank (category,prompt,reference,created_at) VALUES (?,?,?,?)",
-              (cat,prompt,ref,datetime.utcnow().isoformat()))
-    conn.commit()
-    conn.close()
+    return res
 
 def get_practice_bank():
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT * FROM practice_bank")
-    rows = c.fetchall()
+    conn=sqlite3.connect(DB_PATH)
+    c=conn.cursor()
+    c.execute("SELECT id,category,prompt,reference FROM practices")
+    res=[{"id":r[0],"category":r[1],"prompt":r[2],"reference":r[3]} for r in c.fetchall()]
     conn.close()
-    return rows
+    return res
 
-def assign_practices_to_user(username, ids):
-    conn = get_conn()
-    c = conn.cursor()
-    for pid in ids:
-        c.execute("INSERT INTO student_practice (username,practice_id,status,assigned_at) VALUES (?,?,?,?)",
-                  (username,pid,"recommended",datetime.utcnow().isoformat()))
+def add_practice_item(category,prompt,reference):
+    conn=sqlite3.connect(DB_PATH)
+    c=conn.cursor()
+    c.execute("INSERT INTO practices(category,prompt,reference) VALUES (?,?,?)",(category,prompt,reference))
     conn.commit()
     conn.close()
 
 def get_student_practice(username):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("""SELECT sp.id, sp.practice_id, pb.category, pb.prompt, pb.reference, sp.status, sp.assigned_at, sp.completed_at
-                 FROM student_practice sp JOIN practice_bank pb ON sp.practice_id=pb.id
-                 WHERE sp.username=?""",(username,))
-    rows = c.fetchall()
+    conn=sqlite3.connect(DB_PATH)
+    c=conn.cursor()
+    c.execute("SELECT id,practice_id,category,prompt,reference,status,assigned_at,completed_at FROM student_practice WHERE username=?",(username,))
+    res=c.fetchall()
     conn.close()
-    return rows
+    return res
 
-def mark_practice_completed(sp_id, text, username):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("UPDATE student_practice SET status='completed', completed_at=? WHERE id=?",
-              (datetime.utcnow().isoformat(), sp_id))
+def mark_practice_completed(sp_id,ans,username,bleu=0,chrf=0,semantic=0,edits=0,effort=0,feedback=""):
+    conn=sqlite3.connect(DB_PATH)
+    c=conn.cursor()
+    c.execute('''UPDATE student_practice SET status='completed',completed_at=?,bleu=?,chrf=?,semantic=?,edits=?,effort=?,feedback=?
+                 WHERE id=?''',(str(datetime.now()),bleu,chrf,semantic,edits,effort,str(feedback),sp_id))
     conn.commit()
     conn.close()
 
-# Heuristics
-HEUR_FILE = "heuristics.json"
-def load_heuristics():
-    if os.path.exists(HEUR_FILE):
-        with open(HEUR_FILE,"r") as f: return json.load(f)
-    return {"semantic_threshold":65,"bleu_threshold":30,"chrf_threshold":40}
-
-def save_heuristics(h):
-    with open(HEUR_FILE,"w") as f: json.dump(h,f)
-
-# Error patterns
 def compute_error_pattern(username):
-    subs = get_submissions(username)
-    if not subs: return None
-    df = pd.DataFrame(subs, columns=["id","user","task","src","mt","pe","bleu","chrf","semantic","edits","effort","created"])
+    submissions=get_submissions(username)
+    if not submissions: return None
+    avg_bleu=sum([s['bleu'] for s in submissions])/len(submissions)
+    avg_chrf=sum([s['chrf'] for s in submissions])/len(submissions)
+    avg_semantic=sum([s['semantic'] for s in submissions])/len(submissions)
+    avg_edits=sum([s['edits'] for s in submissions])/len(submissions)
+    avg_effort=sum([s['effort'] for s in submissions])/len(submissions)
+    return {"avg_bleu":avg_bleu,"avg_chrf":avg_chrf,"avg_semantic":avg_semantic,"avg_edits":avg_edits,"avg_effort":avg_effort}
+
+def compute_composite_score(username):
+    pattern=compute_error_pattern(username)
+    if not pattern: return {}
     return {
-        "avg_bleu": df["bleu"].mean(),
-        "avg_chrf": df["chrf"].mean(),
-        "avg_semantic": df["semantic"].mean(),
-        "avg_edits": df["edits"].mean(),
-        "avg_effort": df["effort"].mean()
+        "vocabulary":1-pattern.get("avg_bleu",0),
+        "structure":1-pattern.get("avg_chrf",0),
+        "meaning":1-pattern.get("avg_semantic",0),
+        "editing":pattern.get("avg_effort",0)/100
     }
