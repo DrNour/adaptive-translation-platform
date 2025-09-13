@@ -1,156 +1,17 @@
+# main_app.py
 import streamlit as st
-import sqlite3
-from datetime import datetime
-import plotly.graph_objects as go
-
-DB_PATH = "adaptive_learning.db"
-
-# -----------------------------
-# DATABASE FUNCTIONS
-# -----------------------------
-
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    # Users table
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        username TEXT PRIMARY KEY,
-        password TEXT,
-        role TEXT,
-        points INTEGER DEFAULT 0
-    )
-    """)
-    # Tasks table
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS tasks (
-        task_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        text TEXT
-    )
-    """)
-    # Practice table
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS practice (
-        practice_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        category TEXT,
-        prompt TEXT,
-        reference TEXT
-    )
-    """)
-    # Student practice table
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS student_practice (
-        rowid INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT,
-        practice_id INTEGER,
-        status TEXT DEFAULT 'recommended',
-        assigned_at TEXT,
-        completed_at TEXT,
-        FOREIGN KEY(username) REFERENCES users(username),
-        FOREIGN KEY(practice_id) REFERENCES practice(practice_id)
-    )
-    """)
-    # Submissions table
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS submissions (
-        submission_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT,
-        task_id INTEGER,
-        original_text TEXT,
-        mt_text TEXT,
-        post_edit TEXT,
-        fluency_errors INTEGER,
-        collocation_errors INTEGER,
-        idiom_errors INTEGER,
-        submitted_at TEXT,
-        FOREIGN KEY(username) REFERENCES users(username),
-        FOREIGN KEY(task_id) REFERENCES tasks(task_id)
-    )
-    """)
-    conn.commit()
-    conn.close()
-
-def register_user(username, password, role):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    try:
-        c.execute("INSERT INTO users VALUES (?, ?, ?, ?)", (username, password, role, 0))
-        conn.commit()
-        return True
-    except sqlite3.IntegrityError:
-        return False
-    finally:
-        conn.close()
-
-def validate_login(username, password):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT password FROM users WHERE username=?", (username,))
-    row = c.fetchone()
-    conn.close()
-    return row and row[0] == password
-
-def get_user_role(username):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT role FROM users WHERE username=?", (username,))
-    row = c.fetchone()
-    conn.close()
-    return row[0] if row else None
-
-def get_tasks():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT task_id, text FROM tasks")
-    tasks = c.fetchall()
-    conn.close()
-    return tasks
-
-def save_submission(username, task_id, original_text, mt_text, post_edit,
-                    fluency, collocation, idiom):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("""INSERT INTO submissions
-                 (username, task_id, original_text, mt_text, post_edit,
-                  fluency_errors, collocation_errors, idiom_errors, submitted_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-              (username, task_id, original_text, mt_text, post_edit,
-               fluency, collocation, idiom, datetime.now().isoformat()))
-    # Add points for gamification
-    points = max(0, 10 - (fluency + collocation + idiom))
-    c.execute("UPDATE users SET points = points + ? WHERE username=?", (points, username))
-    conn.commit()
-    conn.close()
-
-def get_student_practice(username):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("""SELECT sp.rowid, sp.practice_id, p.category, p.prompt, p.reference, sp.status, sp.assigned_at, sp.completed_at
-                 FROM student_practice sp
-                 JOIN practice p ON sp.practice_id = p.practice_id
-                 WHERE sp.username=?""", (username,))
-    items = c.fetchall()
-    conn.close()
-    return items
-
-def mark_practice_completed(rowid, username):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("UPDATE student_practice SET status='completed', completed_at=? WHERE rowid=? AND username=?",
-              (datetime.now().isoformat(), rowid, username))
-    conn.commit()
-    conn.close()
-
-def get_user_points(username):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT points FROM users WHERE username=?", (username,))
-    row = c.fetchone()
-    conn.close()
-    return row[0] if row else 0
+from db_utils import (
+    init_db, register_user, validate_login, get_user_role,
+    get_tasks, save_submission, get_student_practice,
+    get_practice_bank, add_practice_item, mark_practice_completed
+)
+from metrics_utils import (
+    compute_bleu_chrf, compute_semantic_score, compute_edits_effort,
+    plot_radar_for_student_metrics
+)
 
 # -----------------------------
-# APP PAGES
+# LOGIN / REGISTER
 # -----------------------------
 
 def show_login():
@@ -173,16 +34,20 @@ def show_register():
     if st.button("Register"):
         ok = register_user(username, password, role)
         if ok:
-            st.success("Registration successful! You can now login.")
+            st.success("Registration successful!")
         else:
             st.error("Username already exists.")
 
+# -----------------------------
+# STUDENT DASHBOARD
+# -----------------------------
+
 def student_dashboard():
     st.sidebar.markdown(f"👤 Logged in as: {st.session_state.username} ({st.session_state.role})")
-    st.sidebar.markdown(f"🏆 Points: {get_user_points(st.session_state.username)}")
     st.sidebar.button("Logout", on_click=lambda: st.session_state.clear())
 
     st.title("🎓 Student Dashboard")
+
     st.subheader("📌 Translation Tasks")
     tasks = get_tasks()
     if not tasks:
@@ -193,25 +58,71 @@ def student_dashboard():
             mt_text = st.text_area("Machine Translation (for comparison)", key=f"mt_{tid}")
             post_edit = st.text_area("Your Translation / Post-edit", key=f"pe_{tid}")
             if st.button(f"Submit Task {tid}"):
-                # Simple simulated error analysis
-                fluency = len(post_edit.split()) % 5  # dummy
-                collocation = len(post_edit.split()) % 3  # dummy
-                idiom = len(post_edit.split()) % 2  # dummy
+                # Compute metrics
+                bleu, chrf = compute_bleu_chrf(text, post_edit)
+                semantic = compute_semantic_score(text, post_edit)
+                edits, effort = compute_edits_effort(mt_text, post_edit)
+                fluency, colloc, idiom = 0, 0, 0  # Placeholder for adaptive assessment
                 save_submission(st.session_state.username, tid, text, mt_text, post_edit,
-                                fluency, collocation, idiom)
-                st.success(f"Submission saved! Errors -> Fluency: {fluency}, Collocation: {collocation}, Idioms: {idiom}")
+                                bleu, chrf, semantic, edits, effort,
+                                fluency, colloc, idiom)
+                st.success("Submission saved!")
+
+    st.subheader("🗂 My Practice Queue")
+    queue = get_student_practice(st.session_state.username)
+    if not queue:
+        st.info("No practice items yet.")
+    else:
+        for sp_id, pid, cat, prompt, ref, status, assigned_at, completed_at in queue:
+            st.markdown(f"**[{status.upper()}]** ({cat}) {prompt}")
+            if status == "recommended":
+                if st.button(f"Do Practice {sp_id}"):
+                    st.session_state.active_practice = (sp_id, prompt, ref)
+                    st.experimental_rerun()
+            if status == "completed":
+                st.caption(f"Completed: {completed_at}")
+
+        if "active_practice" in st.session_state and st.session_state.active_practice:
+            sp_id, prompt, ref = st.session_state.active_practice
+            st.text_area("Practice prompt", prompt, disabled=True)
+            ans = st.text_area("Your translation", key=f"prac_{sp_id}")
+            if st.button("Submit Practice"):
+                mark_practice_completed(sp_id, ans, st.session_state.username)
+                st.success("Practice completed!")
+                st.session_state.active_practice = None
+                st.experimental_rerun()
+
+# -----------------------------
+# INSTRUCTOR DASHBOARD
+# -----------------------------
 
 def instructor_dashboard():
     st.sidebar.markdown(f"👤 Logged in as: {st.session_state.username} ({st.session_state.role})")
     st.sidebar.button("Logout", on_click=lambda: st.session_state.clear())
+
     st.title("👨‍🏫 Instructor Dashboard")
-    st.write("Instructor features can be expanded here.")
+    st.subheader("📌 Practice Bank")
+    cat = st.text_input("Category")
+    prompt = st.text_area("Practice prompt")
+    ref = st.text_area("Reference translation")
+    if st.button("Add Practice"):
+        add_practice_item(cat, prompt, ref)
+        st.success("Practice added!")
+
+    st.subheader("🔧 Assign Practices")
+    practices = get_practice_bank()
+    st.table(practices)
+
+# -----------------------------
+# ADMIN DASHBOARD
+# -----------------------------
 
 def admin_dashboard():
     st.sidebar.markdown(f"👤 Logged in as: {st.session_state.username} ({st.session_state.role})")
     st.sidebar.button("Logout", on_click=lambda: st.session_state.clear())
+
     st.title("🛠 Admin Dashboard")
-    st.write("Admin features can be expanded here.")
+    st.info("Admin features will be added here")
 
 # -----------------------------
 # MAIN
