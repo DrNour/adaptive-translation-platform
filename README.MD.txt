@@ -1,18 +1,14 @@
-# Adaptive Translation Training App
+# Adaptive Learning Translation App
 
-An AI-driven **adaptive feedback tool** for translator training.
+This app provides an adaptive learning environment for translation students:
 
-## Features
-- English ↔ Arabic translation
-- Post-editing with edit tracking
-- Evaluation: BLEU, chrF, Edit Distance, Semantic
-- Idiom detection (coming soon)
-- Gamification (points, badges)
-- Adaptive feedback with practice queue
-- Dashboards for students, instructors, and admin
+- Student Dashboard: Translation tasks, AI-generated practices, immediate feedback, radar and timeline charts.
+- Instructor Dashboard: Class metrics overview, heatmaps, AI exercise assignment, drill-down per student.
+- Database: SQLite-based for tasks, submissions, practice queue.
+- Metrics: BLEU, chrF, Semantic, Edits, Effort.
 
-## Install
-```bash
-git clone https://github.com/YOUR-USERNAME/adaptive-translation-app.git
-cd adaptive-translation-app
-pip install -r requirements.txt
+## Deployment
+
+1. Push this folder to GitHub.
+2. Connect repository to Streamlit Cloud.
+3. Deploy and enjoy adaptive learning features!
