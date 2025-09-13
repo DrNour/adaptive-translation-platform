@@ -21,7 +21,7 @@ def show_login():
         if validate_login(username, password):
             st.session_state.username = username
             st.session_state.role = get_user_role(username)
-            st.experimental_rerun()
+            st.session_state.rerun_now = True   # set flag for safe rerun
         else:
             st.error("Invalid login")
 
@@ -140,9 +140,13 @@ def instructor_dashboard():
 # -----------------------------
 def main():
     init_db()
-    for key in ["username","role","active_practice","clicked_task_button","clicked_practice_button"]:
+    for key in ["username","role","active_practice","clicked_task_button","clicked_practice_button","rerun_now"]:
         if key not in st.session_state:
             st.session_state[key] = None
+
+    if st.session_state.rerun_now:
+        st.session_state.rerun_now = False
+        st.experimental_rerun()
 
     if st.session_state.username is None:
         tab1, tab2 = st.tabs(["Login", "Register"])
