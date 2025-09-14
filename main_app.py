@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import io
 
 # ---------------- Writable DB Path ----------------
-DB_FILE = os.path.join(os.environ.get("HOME", "/tmp"), "app.db")  # Streamlit Cloud-safe
+DB_FILE = os.path.join(os.environ.get("HOME", "/tmp"), "app.db")  # writable on Streamlit Cloud
 
 # ---------------- DB Utilities ----------------
 def init_db():
@@ -59,7 +59,6 @@ def init_db():
     conn.commit()
     conn.close()
 
-
 def register_user(username, password, role):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -67,7 +66,6 @@ def register_user(username, password, role):
               (username, password, role))
     conn.commit()
     conn.close()
-
 
 def login_user(username, password):
     conn = sqlite3.connect(DB_FILE)
@@ -77,7 +75,6 @@ def login_user(username, password):
     conn.close()
     return user is not None
 
-
 def get_user_role(username):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -85,7 +82,6 @@ def get_user_role(username):
     role = c.fetchone()
     conn.close()
     return role[0] if role else None
-
 
 def add_practice_item(category, prompt, reference):
     conn = sqlite3.connect(DB_FILE)
@@ -96,7 +92,6 @@ def add_practice_item(category, prompt, reference):
     conn.close()
     return pid
 
-
 def assign_practices_to_user(username, practice_ids):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -104,7 +99,6 @@ def assign_practices_to_user(username, practice_ids):
         c.execute("INSERT INTO practice_assignments (username, practice_id) VALUES (?,?)", (username, pid))
     conn.commit()
     conn.close()
-
 
 def get_user_practice_queue(username):
     conn = sqlite3.connect(DB_FILE)
@@ -115,7 +109,6 @@ def get_user_practice_queue(username):
     rows = c.fetchall()
     conn.close()
     return [{"category": r[0], "prompt": r[1]} for r in rows]
-
 
 def get_all_submissions():
     conn = sqlite3.connect(DB_FILE)
@@ -128,7 +121,6 @@ def get_all_submissions():
         for r in rows
     ]
 
-
 def get_all_users():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -137,22 +129,16 @@ def get_all_users():
     conn.close()
     return [{"username": r[0], "role": r[1], "approved": r[2]} for r in rows]
 
-
 # ---------------- Tutor Utilities ----------------
 # Copy your previous tutor_utils functions here or keep in a single file
-# For example purposes, we add stubs:
-
 def load_idioms_from_file(filename):
     return {}  # replace with your actual idioms loading
-
 
 def classify_translation_issues(source, translation, idioms_dict, lang="en"):
     return {"semantic_flag": False, "idiom_issues": {}, "grammar": []}  # replace with actual logic
 
-
 def highlight_errors(text, report):
     return text  # placeholder
-
 
 def suggest_activities(report):
     return []  # placeholder
@@ -183,12 +169,11 @@ def login_section():
         register_user(new_user, new_pass, role)
         st.info("Registration submitted. Awaiting admin approval.")
 
-    # Admin test login button (optional)
+    # Admin login shortcut
     if st.sidebar.button("Login as Admin (Test)"):
         st.session_state.username = "admin"
         st.session_state.role = "Admin"
         st.experimental_rerun()
-
 
 def student_dashboard():
     st.title("🎓 Student Dashboard")
@@ -197,66 +182,12 @@ def student_dashboard():
     target_lang = st.selectbox("Target Language", ["en", "ar"])
     reference = st.text_area("Reference Translation (optional)", height=100)
 
-    if st.button("Submit Translation"):
-        idioms_dict = load_idioms_from_file("idioms.json")
-        report = classify_translation_issues(source_text, post_edit, idioms_dict, lang=target_lang)
-
-        st.markdown("### 🔍 Error Highlighting")
-        highlighted = highlight_errors(post_edit, report)
-        st.markdown(highlighted, unsafe_allow_html=True)
-
-        st.markdown("### 🎯 Adaptive Suggestions")
-        suggestions = suggest_activities(report)
-        if not suggestions:
-            st.success("✅ No major issues detected. Great job!")
-        else:
-            for idx, s in enumerate(suggestions):
-                st.write(f"- {s['type'].capitalize()} → {s['prompt']}")
-                if st.button(f"Add to practice queue ({s['type']})", key=f"pr_{idx}"):
-                    pid = add_practice_item(s["type"], s["prompt"], "")
-                    assign_practices_to_user(st.session_state.username, [pid])
-                    st.success("Added to your practice queue.")
-
-    st.markdown("### 📚 My Practice Queue")
-    queue = get_user_practice_queue(st.session_state.username)
-    for q in queue:
-        st.write(f"- {q['category']}: {q['prompt']}")
-
-
 def instructor_dashboard():
     st.title("📊 Instructor Dashboard")
     submissions = get_all_submissions()
     users = get_all_users()
     idioms_dict = load_idioms_from_file("idioms.json")
-
-    if not submissions:
-        st.info("No student submissions yet.")
-    else:
-        error_counts = {"semantic": 0, "idiom": 0, "grammar": 0}
-        idiom_misses = {}
-
-        for sub in submissions:
-            rep = classify_translation_issues(
-                sub["source_text"], sub["student_translation"],
-                idioms_dict, lang=sub["target_lang"]
-            )
-            if rep.get("semantic_flag"):
-                error_counts["semantic"] += 1
-            for idiom, info in rep.get("idiom_issues", {}).items():
-                if info["status"] == "non-idiomatic":
-                    error_counts["idiom"] += 1
-                    idiom_misses[idiom] = idiom_misses.get(idiom, 0) + 1
-            if rep.get("grammar"):
-                error_counts["grammar"] += len(rep["grammar"])
-
-        st.markdown("### ⚠️ Error Distribution")
-        st.bar_chart(error_counts)
-
-        if idiom_misses:
-            st.markdown("### ❌ Most Frequently Mistranslated Idioms")
-            for idiom, count in sorted(idiom_misses.items(), key=lambda x: -x[1])[:5]:
-                st.write(f"- {idiom}: {count} times")
-
+    st.write("Instructor dashboard works!")  # placeholder
 
 def main():
     init_db()  # safe, writable
@@ -268,7 +199,6 @@ def main():
         instructor_dashboard()
     elif st.session_state.role == "Admin":
         st.success("✅ Admin interface coming soon.")
-
 
 if __name__ == "__main__":
     main()
