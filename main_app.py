@@ -2,7 +2,7 @@ import nltk
 nltk.download('punkt')
 import streamlit as st
 from db_utils import (
-    init_db, register_user, login_user, get_user_role,
+    register_user, login_user, get_user_role,
     add_practice_item, assign_practices_to_user, get_user_practice_queue,
     get_all_submissions, get_all_users, approve_user,
     export_submissions_with_errors, export_instructor_report_pdf,
@@ -12,13 +12,38 @@ import sqlite3
 
 DB_FILE = "app.db"
 
-# ----------------- Initialize DB and Admin -----------------
-init_db()  # ensure tables exist first
-
-def ensure_admin():
+# ----------------- DATABASE INIT & ADMIN -----------------
+def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    # Use INSERT OR IGNORE to avoid crashing if admin already exists
+    # Create tables
+    c.execute("""CREATE TABLE IF NOT EXISTS users (
+        username TEXT PRIMARY KEY,
+        password TEXT,
+        role TEXT,
+        approved INTEGER DEFAULT 0
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS submissions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT,
+        source_text TEXT,
+        student_translation TEXT,
+        reference TEXT,
+        target_lang TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS practice_bank (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category TEXT,
+        prompt TEXT,
+        reference TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS practice_assignments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT,
+        practice_id INTEGER
+    )""")
+    conn.commit()
+    # Insert admin safely
     c.execute(
         "INSERT OR IGNORE INTO users (username, password, role, approved) VALUES (?,?,?,1)",
         ("admin", "admin123", "Admin", 1)
@@ -26,9 +51,10 @@ def ensure_admin():
     conn.commit()
     conn.close()
 
-ensure_admin()
+# Initialize DB
+init_db()
 
-# ----------------- Session State -----------------
+# ----------------- SESSION STATE -----------------
 if "username" not in st.session_state:
     st.session_state.username = None
     st.session_state.role = None
