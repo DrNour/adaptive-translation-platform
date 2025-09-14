@@ -1,15 +1,21 @@
 import sqlite3
 
-conn = sqlite3.connect("app.db")
-c = conn.cursor()
+DB_FILE = "app.db"
 
-# Add admin user (approved immediately)
-c.execute("""
-INSERT OR REPLACE INTO users (username, password, role, approved) 
-VALUES (?, ?, ?, ?)
-""", ("admin", "admin123", "Admin", 1))
+def ensure_admin():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT * FROM users WHERE username='admin'")
+    if not c.fetchone():
+        c.execute(
+            "INSERT INTO users (username, password, role, approved) VALUES (?,?,?,1)",
+            ("admin", "admin123", "Admin", 1)
+        )
+        print("Admin user created: username='admin', password='admin123'")
+    else:
+        print("Admin already exists.")
+    conn.commit()
+    conn.close()
 
-conn.commit()
-conn.close()
-
-print("Admin user added! Login with username='admin', password='admin123'")
+if __name__ == "__main__":
+    ensure_admin()
