@@ -1,42 +1,21 @@
-import streamlit as st
-import sqlite3
 import nltk
 nltk.download('punkt')
-
-# ----------------- IMPORT DB UTILITIES -----------------
+import streamlit as st
 from db_utils import (
     init_db, register_user, login_user, get_user_role,
     add_practice_item, assign_practices_to_user, get_user_practice_queue,
     get_all_submissions, get_all_users,
     export_submissions_with_errors, export_instructor_report_pdf
 )
-# If tutor_utils code is inside db_utils.py, import from there
-from db_utils import load_idioms_from_file, classify_translation_issues, highlight_errors, suggest_activities
+from db_utils import (
+    load_idioms_from_file, classify_translation_issues,
+    highlight_errors, suggest_activities
+)
 
-# ----------------- INITIALIZE DATABASE -----------------
-init_db()  # ensures all tables exist
+# Initialize DB
+init_db()
 
-# ----------------- AUTO-CREATE ADMIN -----------------
-def ensure_admin():
-    DB_FILE = "app.db"
-    with sqlite3.connect(DB_FILE) as conn:
-        c = conn.cursor()
-        c.execute("SELECT * FROM users WHERE username='admin'")
-        if not c.fetchone():
-            c.execute(
-                "INSERT INTO users (username, password, role, approved) VALUES (?,?,?,1)",
-                ("admin", "admin123", "Admin", 1)
-            )
-            print("Admin account created: username='admin', password='admin123'")
-        else:
-            c.execute(
-                "UPDATE users SET password='admin123', role='Admin', approved=1 WHERE username='admin'"
-            )
-            print("Admin account verified and approved.")
-
-ensure_admin()
-
-# ----------------- SESSION STATE -----------------
+# Session state
 if "username" not in st.session_state:
     st.session_state.username = None
     st.session_state.role = None
