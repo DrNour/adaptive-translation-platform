@@ -1,3 +1,5 @@
+import nltk
+nltk.download('punkt')
 import streamlit as st
 from db_utils import (
     init_db, register_user, login_user, get_user_role,
@@ -131,3 +133,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
