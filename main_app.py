@@ -129,8 +129,7 @@ def get_all_users():
     conn.close()
     return [{"username": r[0], "role": r[1], "approved": r[2]} for r in rows]
 
-# ---------------- Tutor Utilities ----------------
-# Copy your previous tutor_utils functions here or keep in a single file
+# ---------------- Tutor Utilities (placeholder) ----------------
 def load_idioms_from_file(filename):
     return {}  # replace with your actual idioms loading
 
@@ -177,16 +176,10 @@ def login_section():
 
 def student_dashboard():
     st.title("🎓 Student Dashboard")
-    source_text = st.text_area("Source Text")
-    post_edit = st.text_area("Your Translation", height=150)
-    target_lang = st.selectbox("Target Language", ["en", "ar"])
-    reference = st.text_area("Reference Translation (optional)", height=100)
+    st.write("Student dashboard works!")  # placeholder
 
 def instructor_dashboard():
     st.title("📊 Instructor Dashboard")
-    submissions = get_all_submissions()
-    users = get_all_users()
-    idioms_dict = load_idioms_from_file("idioms.json")
     st.write("Instructor dashboard works!")  # placeholder
 
 def main():
