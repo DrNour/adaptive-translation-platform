@@ -1,4 +1,19 @@
+import streamlit as st
+from db_utils import (
+    init_db, register_user, login_user, get_user_role,
+    add_practice_item, assign_practices_to_user, get_user_practice_queue,
+    get_all_submissions, get_all_users,
+    export_submissions_with_errors, export_instructor_report_pdf,
+    load_idioms_from_file, classify_translation_issues,
+    highlight_errors, suggest_activities,
+    approve_user, delete_user, update_user_role
+)
 import sqlite3
+import nltk
+nltk.download('punkt')
+
+# ----------------- INITIALIZE DATABASE -----------------
+init_db()  # Create tables if they don't exist
 
 # ----------------- AUTO-CREATE ADMIN -----------------
 DB_FILE = "app.db"
@@ -8,13 +23,16 @@ c = conn.cursor()
 # Check if admin exists
 c.execute("SELECT * FROM users WHERE username='admin'")
 if not c.fetchone():
-    # Create admin account with approved=1
-    c.execute("INSERT INTO users (username, password, role, approved) VALUES (?,?,?,1)",
-              ("admin", "admin123", "Admin", 1))
+    c.execute(
+        "INSERT INTO users (username, password, role, approved) VALUES (?,?,?,1)",
+        ("admin", "admin123", "Admin", 1)
+    )
     print("Admin account created: username='admin', password='admin123'")
 else:
-    # Make sure admin is approved and role correct
-    c.execute("UPDATE users SET password='admin123', role='Admin', approved=1 WHERE username='admin'")
+    # Ensure admin is approved and role correct
+    c.execute(
+        "UPDATE users SET password='admin123', role='Admin', approved=1 WHERE username='admin'"
+    )
     print("Admin account verified and approved.")
 
 conn.commit()
@@ -200,4 +218,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
