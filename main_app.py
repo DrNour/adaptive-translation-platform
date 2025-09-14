@@ -1,6 +1,5 @@
 import nltk
 nltk.download('punkt')
-
 import streamlit as st
 from db_utils import (
     init_db, register_user, login_user, get_user_role,
@@ -12,21 +11,15 @@ from db_utils import (
     approve_user, delete_user, update_user_role
 )
 
-# -----------------------------
 # Initialize DB
-# -----------------------------
 init_db()
 
-# -----------------------------
-# Session State
-# -----------------------------
+# Session state
 if "username" not in st.session_state:
     st.session_state.username = None
     st.session_state.role = None
 
-# -----------------------------
-# LOGIN / REGISTER
-# -----------------------------
+# ----------------- LOGIN / REGISTER -----------------
 def login_section():
     st.sidebar.header("Login")
     username = st.sidebar.text_input("Username")
@@ -48,9 +41,7 @@ def login_section():
         register_user(new_user, new_pass, role)
         st.info("Registration submitted. Awaiting admin approval.")
 
-# -----------------------------
-# STUDENT DASHBOARD
-# -----------------------------
+# ----------------- STUDENT DASHBOARD -----------------
 def student_dashboard():
     # Logout button
     if st.button("🔒 Logout"):
@@ -89,9 +80,7 @@ def student_dashboard():
     for q in queue:
         st.write(f"- {q['category']}: {q['prompt']}")
 
-# -----------------------------
-# INSTRUCTOR DASHBOARD
-# -----------------------------
+# ----------------- INSTRUCTOR DASHBOARD -----------------
 def instructor_dashboard():
     # Logout button
     if st.button("🔒 Logout"):
@@ -101,7 +90,6 @@ def instructor_dashboard():
 
     st.title("📊 Instructor Dashboard")
     submissions = get_all_submissions()
-    users = get_all_users()
     idioms_dict = load_idioms_from_file("idioms.json")
 
     if not submissions:
@@ -142,9 +130,7 @@ def instructor_dashboard():
         with open(filepath, "rb") as f:
             st.download_button("Download PDF File", f, file_name="instructor_report.pdf")
 
-# -----------------------------
-# ADMIN DASHBOARD
-# -----------------------------
+# ----------------- ADMIN DASHBOARD -----------------
 def admin_dashboard():
     # Logout button
     if st.button("🔒 Logout"):
@@ -180,9 +166,7 @@ def admin_dashboard():
             update_user_role(u['username'], new_role)
             st.experimental_rerun()
 
-# -----------------------------
-# MAIN
-# -----------------------------
+# ----------------- MAIN -----------------
 def main():
     if not st.session_state.username:
         login_section()
