@@ -1,59 +1,42 @@
 import streamlit as st
-from db_utils import (
-    init_db, register_user, login_user, get_user_role,
-    add_practice_item, assign_practices_to_user, get_user_practice_queue,
-    get_all_submissions, get_all_users,
-    export_submissions_with_errors, export_instructor_report_pdf,
-    load_idioms_from_file, classify_translation_issues,
-    highlight_errors, suggest_activities,
-    approve_user, delete_user, update_user_role
-)
 import sqlite3
 import nltk
 nltk.download('punkt')
 
-# ----------------- INITIALIZE DATABASE -----------------
-init_db()  # Create tables if they don't exist
-
-# ----------------- AUTO-CREATE ADMIN -----------------
-DB_FILE = "app.db"
-conn = sqlite3.connect(DB_FILE)
-c = conn.cursor()
-
-# Check if admin exists
-c.execute("SELECT * FROM users WHERE username='admin'")
-if not c.fetchone():
-    c.execute(
-        "INSERT INTO users (username, password, role, approved) VALUES (?,?,?,1)",
-        ("admin", "admin123", "Admin", 1)
-    )
-    print("Admin account created: username='admin', password='admin123'")
-else:
-    # Ensure admin is approved and role correct
-    c.execute(
-        "UPDATE users SET password='admin123', role='Admin', approved=1 WHERE username='admin'"
-    )
-    print("Admin account verified and approved.")
-
-conn.commit()
-conn.close()
-import nltk
-nltk.download('punkt')
-import streamlit as st
+# ----------------- IMPORT DB UTILITIES -----------------
 from db_utils import (
     init_db, register_user, login_user, get_user_role,
     add_practice_item, assign_practices_to_user, get_user_practice_queue,
     get_all_submissions, get_all_users,
-    export_submissions_with_errors, export_instructor_report_pdf,
-    load_idioms_from_file, classify_translation_issues,
-    highlight_errors, suggest_activities,
-    approve_user, delete_user, update_user_role
+    export_submissions_with_errors, export_instructor_report_pdf
 )
+# If tutor_utils code is inside db_utils.py, import from there
+from db_utils import load_idioms_from_file, classify_translation_issues, highlight_errors, suggest_activities
 
-# Initialize DB
-init_db()
+# ----------------- INITIALIZE DATABASE -----------------
+init_db()  # ensures all tables exist
 
-# Session state
+# ----------------- AUTO-CREATE ADMIN -----------------
+def ensure_admin():
+    DB_FILE = "app.db"
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute("SELECT * FROM users WHERE username='admin'")
+        if not c.fetchone():
+            c.execute(
+                "INSERT INTO users (username, password, role, approved) VALUES (?,?,?,1)",
+                ("admin", "admin123", "Admin", 1)
+            )
+            print("Admin account created: username='admin', password='admin123'")
+        else:
+            c.execute(
+                "UPDATE users SET password='admin123', role='Admin', approved=1 WHERE username='admin'"
+            )
+            print("Admin account verified and approved.")
+
+ensure_admin()
+
+# ----------------- SESSION STATE -----------------
 if "username" not in st.session_state:
     st.session_state.username = None
     st.session_state.role = None
@@ -82,12 +65,6 @@ def login_section():
 
 # ----------------- STUDENT DASHBOARD -----------------
 def student_dashboard():
-    # Logout button
-    if st.button("🔒 Logout"):
-        st.session_state.username = None
-        st.session_state.role = None
-        st.experimental_rerun()
-
     st.title("🎓 Student Dashboard")
     source_text = st.text_area("Source Text")
     post_edit = st.text_area("Your Translation", height=150)
@@ -121,14 +98,9 @@ def student_dashboard():
 
 # ----------------- INSTRUCTOR DASHBOARD -----------------
 def instructor_dashboard():
-    # Logout button
-    if st.button("🔒 Logout"):
-        st.session_state.username = None
-        st.session_state.role = None
-        st.experimental_rerun()
-
     st.title("📊 Instructor Dashboard")
     submissions = get_all_submissions()
+    users = get_all_users()
     idioms_dict = load_idioms_from_file("idioms.json")
 
     if not submissions:
@@ -145,7 +117,7 @@ def instructor_dashboard():
             if rep.get("semantic_flag"):
                 error_counts["semantic"] += 1
             for idiom, info in rep.get("idiom_issues", {}).items():
-                if info.get("status") == "non-idiomatic":
+                if info["status"] == "non-idiomatic":
                     error_counts["idiom"] += 1
                     idiom_misses[idiom] = idiom_misses.get(idiom, 0) + 1
             if rep.get("grammar"):
@@ -169,42 +141,6 @@ def instructor_dashboard():
         with open(filepath, "rb") as f:
             st.download_button("Download PDF File", f, file_name="instructor_report.pdf")
 
-# ----------------- ADMIN DASHBOARD -----------------
-def admin_dashboard():
-    # Logout button
-    if st.button("🔒 Logout"):
-        st.session_state.username = None
-        st.session_state.role = None
-        st.experimental_rerun()
-
-    st.title("🛠 Admin Dashboard")
-    users = get_all_users()
-    st.markdown("### Registered Users")
-    for u in users:
-        st.write(f"- {u['username']} | Role: {u['role']} | Approved: {u['approved']}")
-        cols = st.columns(3)
-
-        # Approve button
-        if not u['approved']:
-            if cols[0].button(f"Approve {u['username']}", key=f"approve_{u['username']}"):
-                approve_user(u['username'])
-                st.experimental_rerun()
-
-        # Delete button
-        if cols[1].button(f"Delete {u['username']}", key=f"delete_{u['username']}"):
-            delete_user(u['username'])
-            st.experimental_rerun()
-
-        # Change role
-        new_role = cols[2].selectbox(
-            "Change Role", ["Student", "Instructor", "Admin"],
-            index=["Student", "Instructor", "Admin"].index(u['role']),
-            key=f"role_{u['username']}"
-        )
-        if new_role != u['role']:
-            update_user_role(u['username'], new_role)
-            st.experimental_rerun()
-
 # ----------------- MAIN -----------------
 def main():
     if not st.session_state.username:
@@ -214,9 +150,7 @@ def main():
     elif st.session_state.role == "Instructor":
         instructor_dashboard()
     elif st.session_state.role == "Admin":
-        admin_dashboard()
+        st.success("✅ Admin interface coming soon.")
 
 if __name__ == "__main__":
     main()
-
-
