@@ -7,60 +7,11 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 import matplotlib.pyplot as plt
 import io
+import re
 
 DB_FILE = "app.db"
 
-# -----------------------------
-# Helper functions (formerly in tutor_utils.py)
-# -----------------------------
-def load_idioms_from_file(filepath="idioms.json"):
-    """Load idioms from a JSON file."""
-    try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {}
-
-def classify_translation_issues(source_text, student_translation, idioms_dict, lang="en"):
-    """
-    Dummy implementation.
-    Replace with your actual logic to check semantic, idiom, and grammar issues.
-    """
-    return {
-        "semantic_score": 0,
-        "semantic_flag": False,
-        "idiom_issues": {},
-        "grammar": []
-    }
-
-def highlight_errors(student_translation, report):
-    """
-    Highlight errors in the student's translation.
-    For now, this is a dummy implementation. 
-    You can enhance it with HTML/CSS for real highlighting.
-    """
-    if report.get("semantic_flag") or report.get("idiom_issues") or report.get("grammar"):
-        return f"<mark>{student_translation}</mark>"
-    return student_translation
-
-def suggest_activities(report):
-    """
-    Provide adaptive suggestions based on the translation report.
-    Returns a list of dicts: [{"type": "idiom", "prompt": "..."}]
-    """
-    suggestions = []
-    for idiom, info in report.get("idiom_issues", {}).items():
-        if info.get("status") == "non-idiomatic":
-            suggestions.append({"type": "idiom", "prompt": f"Practice idiom: {idiom}"})
-    if report.get("semantic_flag"):
-        suggestions.append({"type": "semantic", "prompt": "Review semantic issues in your translation."})
-    if report.get("grammar"):
-        suggestions.append({"type": "grammar", "prompt": "Check grammar corrections."})
-    return suggestions
-
-# -----------------------------
-# Database setup
-# -----------------------------
+# ----------------- DATABASE FUNCTIONS -----------------
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -92,9 +43,6 @@ def init_db():
     conn.commit()
     conn.close()
 
-# -----------------------------
-# User management
-# -----------------------------
 def register_user(username, password, role):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -119,9 +67,6 @@ def get_user_role(username):
     conn.close()
     return role[0] if role else None
 
-# -----------------------------
-# Practice management
-# -----------------------------
 def add_practice_item(category, prompt, reference):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -149,9 +94,6 @@ def get_user_practice_queue(username):
     conn.close()
     return [{"category": r[0], "prompt": r[1]} for r in rows]
 
-# -----------------------------
-# Submission management
-# -----------------------------
 def get_all_submissions():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -171,16 +113,69 @@ def get_all_users():
     conn.close()
     return [{"username": r[0], "role": r[1], "approved": r[2]} for r in rows]
 
-# -----------------------------
-# Export functions
-# -----------------------------
+def approve_user(username):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("UPDATE users SET approved=1 WHERE username=?", (username,))
+    conn.commit()
+    conn.close()
+
+def delete_user(username):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("DELETE FROM users WHERE username=?", (username,))
+    conn.commit()
+    conn.close()
+
+def update_user_role(username, new_role):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("UPDATE users SET role=? WHERE username=?", (new_role, username))
+    conn.commit()
+    conn.close()
+
+# ----------------- TUTOR UTILITIES -----------------
+def load_idioms_from_file(filepath="idioms.json"):
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+
+def classify_translation_issues(source, translation, idioms_dict=None, lang="en"):
+    # Minimal example: real logic can be more complex
+    report = {"semantic_flag": False, "semantic_score": 1.0, "idiom_issues": {}, "grammar": []}
+    if idioms_dict:
+        for idiom in idioms_dict:
+            if idiom in source and idiom not in translation:
+                report["idiom_issues"][idiom] = {"status": "non-idiomatic"}
+    return report
+
+def highlight_errors(translation, report):
+    # Simple HTML highlighting
+    highlighted = translation
+    for idiom, info in report.get("idiom_issues", {}).items():
+        if info["status"] == "non-idiomatic":
+            highlighted = highlighted.replace(idiom, f"<span style='color:red'>{idiom}</span>")
+    return highlighted
+
+def suggest_activities(report):
+    suggestions = []
+    if report.get("semantic_flag"):
+        suggestions.append({"type": "semantic", "prompt": "Review semantic meaning."})
+    for idiom, info in report.get("idiom_issues", {}).items():
+        if info["status"] == "non-idiomatic":
+            suggestions.append({"type": "idiom", "prompt": f"Practice idiom: {idiom}"})
+    for g in report.get("grammar", []):
+        suggestions.append({"type": "grammar", "prompt": g})
+    return suggestions
+
+# ----------------- EXPORT FUNCTIONS -----------------
 def export_submissions_with_errors(filepath="submissions_with_errors.csv"):
     submissions = get_all_submissions()
     idioms_dict = load_idioms_from_file("idioms.json")
-
     headers = ["username", "source_text", "student_translation", "reference", "target_lang",
                "semantic_score", "semantic_flag", "idiom_issues", "grammar_issues"]
-
     export_rows = []
     for sub in submissions:
         rep = classify_translation_issues(sub["source_text"], sub["student_translation"], idioms_dict, lang=sub["target_lang"])
@@ -190,21 +185,17 @@ def export_submissions_with_errors(filepath="submissions_with_errors.csv"):
             json.dumps(rep.get("idiom_issues", {}), ensure_ascii=False),
             json.dumps(rep.get("grammar", []), ensure_ascii=False)
         ])
-
     with open(filepath, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(headers)
         writer.writerows(export_rows)
-
     return filepath
 
 def export_instructor_report_pdf(filepath="instructor_report.pdf"):
     submissions = get_all_submissions()
     idioms_dict = load_idioms_from_file("idioms.json")
-
     error_counts = {"semantic": 0, "idiom": 0, "grammar": 0}
     idiom_misses = {}
-
     for sub in submissions:
         rep = classify_translation_issues(sub["source_text"], sub["student_translation"], idioms_dict, lang=sub["target_lang"])
         if rep.get("semantic_flag"):
@@ -221,7 +212,6 @@ def export_instructor_report_pdf(filepath="instructor_report.pdf"):
     elements = []
     elements.append(Paragraph("Instructor Report", styles["Title"]))
     elements.append(Spacer(1, 12))
-
     elements.append(Paragraph("Error Distribution:", styles["Heading2"]))
     data = [["Error Type", "Count"]] + [[k, v] for k, v in error_counts.items()]
     table = Table(data)
