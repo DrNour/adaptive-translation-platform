@@ -1,26 +1,31 @@
 import nltk
 nltk.download('punkt')
+
 import streamlit as st
 from db_utils import (
     init_db, register_user, login_user, get_user_role,
     add_practice_item, assign_practices_to_user, get_user_practice_queue,
     get_all_submissions, get_all_users,
-    export_submissions_with_errors, export_instructor_report_pdf
-)
-from tutor_utils import (
+    export_submissions_with_errors, export_instructor_report_pdf,
     load_idioms_from_file, classify_translation_issues,
     highlight_errors, suggest_activities
 )
 
+# -----------------------------
 # Initialize DB
+# -----------------------------
 init_db()
 
-# Session state
+# -----------------------------
+# Session State
+# -----------------------------
 if "username" not in st.session_state:
     st.session_state.username = None
     st.session_state.role = None
 
-# ----------------- LOGIN / REGISTER -----------------
+# -----------------------------
+# LOGIN / REGISTER
+# -----------------------------
 def login_section():
     st.sidebar.header("Login")
     username = st.sidebar.text_input("Username")
@@ -42,9 +47,12 @@ def login_section():
         register_user(new_user, new_pass, role)
         st.info("Registration submitted. Awaiting admin approval.")
 
-# ----------------- STUDENT DASHBOARD -----------------
+# -----------------------------
+# STUDENT DASHBOARD
+# -----------------------------
 def student_dashboard():
     st.title("🎓 Student Dashboard")
+
     source_text = st.text_area("Source Text")
     post_edit = st.text_area("Your Translation", height=150)
     target_lang = st.selectbox("Target Language", ["en", "ar"])
@@ -75,7 +83,9 @@ def student_dashboard():
     for q in queue:
         st.write(f"- {q['category']}: {q['prompt']}")
 
-# ----------------- INSTRUCTOR DASHBOARD -----------------
+# -----------------------------
+# INSTRUCTOR DASHBOARD
+# -----------------------------
 def instructor_dashboard():
     st.title("📊 Instructor Dashboard")
     submissions = get_all_submissions()
@@ -96,7 +106,7 @@ def instructor_dashboard():
             if rep.get("semantic_flag"):
                 error_counts["semantic"] += 1
             for idiom, info in rep.get("idiom_issues", {}).items():
-                if info["status"] == "non-idiomatic":
+                if info.get("status") == "non-idiomatic":
                     error_counts["idiom"] += 1
                     idiom_misses[idiom] = idiom_misses.get(idiom, 0) + 1
             if rep.get("grammar"):
@@ -120,7 +130,9 @@ def instructor_dashboard():
         with open(filepath, "rb") as f:
             st.download_button("Download PDF File", f, file_name="instructor_report.pdf")
 
-# ----------------- MAIN -----------------
+# -----------------------------
+# MAIN
+# -----------------------------
 def main():
     if not st.session_state.username:
         login_section()
@@ -133,4 +145,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
