@@ -4,16 +4,32 @@ import streamlit as st
 from db_utils import (
     init_db, register_user, login_user, get_user_role,
     add_practice_item, assign_practices_to_user, get_user_practice_queue,
-    get_all_submissions, get_all_users,
+    get_all_submissions, get_all_users, approve_user,
     export_submissions_with_errors, export_instructor_report_pdf,
-    load_idioms_from_file, classify_translation_issues,
-    highlight_errors, suggest_activities, approve_user
+    load_idioms_from_file, classify_translation_issues, highlight_errors, suggest_activities
 )
+import sqlite3
 
-# Initialize DB
+# ----------------- Ensure Admin Exists -----------------
+DB_FILE = "app.db"
+def ensure_admin():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT * FROM users WHERE username='admin'")
+    if not c.fetchone():
+        c.execute(
+            "INSERT INTO users (username, password, role, approved) VALUES (?,?,?,1)",
+            ("admin", "admin123", "Admin", 1)
+        )
+        print("Admin user created: username='admin', password='admin123'")
+    conn.commit()
+    conn.close()
+
+# ----------------- Initialize DB -----------------
 init_db()
+ensure_admin()
 
-# Session state
+# ----------------- Session State -----------------
 if "username" not in st.session_state:
     st.session_state.username = None
     st.session_state.role = None
@@ -121,19 +137,41 @@ def instructor_dashboard():
 # ----------------- ADMIN DASHBOARD -----------------
 def admin_dashboard():
     st.title("🛠 Admin Dashboard")
-    users = get_all_users()
-    st.markdown("### Pending Users")
-    pending_users = [u for u in users if u["approved"] == 0]
 
-    if not pending_users:
-        st.info("No pending users to approve.")
-    else:
+    users = get_all_users()
+    st.markdown("### 👥 Pending Users for Approval")
+    pending_users = [u for u in users if u["approved"] == 0]
+    if pending_users:
         for u in pending_users:
             st.write(f"- {u['username']} ({u['role']})")
-            if st.button(f"Approve {u['username']}", key=f"approve_{u['username']}"):
-                approve_user(u['username'])
-                st.success(f"{u['username']} approved!")
-                st.experimental_rerun()
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button(f"Approve {u['username']}", key=f"approve_{u['username']}"):
+                    approve_user(u['username'])
+                    st.success(f"{u['username']} approved")
+                    st.experimental_rerun()
+            with col2:
+                if st.button(f"Reject {u['username']}", key=f"reject_{u['username']}"):
+                    st.info(f"{u['username']} rejected (manual deletion required)")
+    else:
+        st.info("No pending users.")
+
+    st.markdown("### 📋 All Users")
+    for u in users:
+        status = "✅ Approved" if u["approved"] else "❌ Pending"
+        st.write(f"- {u['username']} ({u['role']}) → {status}")
+
+    st.markdown("### 📝 All Submissions")
+    submissions = get_all_submissions()
+    if submissions:
+        for sub in submissions:
+            st.write(f"**{sub['username']} → {sub['target_lang']}**")
+            st.write(f"Source: {sub['source_text']}")
+            st.write(f"Student Translation: {sub['student_translation']}")
+            st.write(f"Reference: {sub['reference']}")
+            st.write("---")
+    else:
+        st.info("No submissions yet.")
 
 # ----------------- MAIN -----------------
 def main():
