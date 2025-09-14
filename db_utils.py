@@ -11,7 +11,7 @@ import io
 DB_FILE = "app.db"
 
 # -----------------------------
-# Helper functions
+# Helper functions (formerly in tutor_utils.py)
 # -----------------------------
 def load_idioms_from_file(filepath="idioms.json"):
     """Load idioms from a JSON file."""
@@ -32,6 +32,31 @@ def classify_translation_issues(source_text, student_translation, idioms_dict, l
         "idiom_issues": {},
         "grammar": []
     }
+
+def highlight_errors(student_translation, report):
+    """
+    Highlight errors in the student's translation.
+    For now, this is a dummy implementation. 
+    You can enhance it with HTML/CSS for real highlighting.
+    """
+    if report.get("semantic_flag") or report.get("idiom_issues") or report.get("grammar"):
+        return f"<mark>{student_translation}</mark>"
+    return student_translation
+
+def suggest_activities(report):
+    """
+    Provide adaptive suggestions based on the translation report.
+    Returns a list of dicts: [{"type": "idiom", "prompt": "..."}]
+    """
+    suggestions = []
+    for idiom, info in report.get("idiom_issues", {}).items():
+        if info.get("status") == "non-idiomatic":
+            suggestions.append({"type": "idiom", "prompt": f"Practice idiom: {idiom}"})
+    if report.get("semantic_flag"):
+        suggestions.append({"type": "semantic", "prompt": "Review semantic issues in your translation."})
+    if report.get("grammar"):
+        suggestions.append({"type": "grammar", "prompt": "Check grammar corrections."})
+    return suggestions
 
 # -----------------------------
 # Database setup
@@ -185,7 +210,7 @@ def export_instructor_report_pdf(filepath="instructor_report.pdf"):
         if rep.get("semantic_flag"):
             error_counts["semantic"] += 1
         for idiom, info in rep.get("idiom_issues", {}).items():
-            if info["status"] == "non-idiomatic":
+            if info.get("status") == "non-idiomatic":
                 error_counts["idiom"] += 1
                 idiom_misses[idiom] = idiom_misses.get(idiom, 0) + 1
         if rep.get("grammar"):
