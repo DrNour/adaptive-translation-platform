@@ -10,23 +10,22 @@ from db_utils import (
 )
 import sqlite3
 
-# ----------------- Ensure Admin Exists -----------------
 DB_FILE = "app.db"
+
+# ----------------- Initialize DB and Admin -----------------
+init_db()  # ensure tables exist first
+
 def ensure_admin():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE username='admin'")
-    if not c.fetchone():
-        c.execute(
-            "INSERT INTO users (username, password, role, approved) VALUES (?,?,?,1)",
-            ("admin", "admin123", "Admin", 1)
-        )
-        print("Admin user created: username='admin', password='admin123'")
+    # Use INSERT OR IGNORE to avoid crashing if admin already exists
+    c.execute(
+        "INSERT OR IGNORE INTO users (username, password, role, approved) VALUES (?,?,?,1)",
+        ("admin", "admin123", "Admin", 1)
+    )
     conn.commit()
     conn.close()
 
-# ----------------- Initialize DB -----------------
-init_db()
 ensure_admin()
 
 # ----------------- Session State -----------------
