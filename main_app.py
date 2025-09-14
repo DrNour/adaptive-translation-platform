@@ -5,11 +5,9 @@ from db_utils import (
     init_db, register_user, login_user, get_user_role,
     add_practice_item, assign_practices_to_user, get_user_practice_queue,
     get_all_submissions, get_all_users,
-    export_submissions_with_errors, export_instructor_report_pdf
-)
-from db_utils import (
+    export_submissions_with_errors, export_instructor_report_pdf,
     load_idioms_from_file, classify_translation_issues,
-    highlight_errors, suggest_activities
+    highlight_errors, suggest_activities, approve_user
 )
 
 # Initialize DB
@@ -120,6 +118,23 @@ def instructor_dashboard():
         with open(filepath, "rb") as f:
             st.download_button("Download PDF File", f, file_name="instructor_report.pdf")
 
+# ----------------- ADMIN DASHBOARD -----------------
+def admin_dashboard():
+    st.title("🛠 Admin Dashboard")
+    users = get_all_users()
+    st.markdown("### Pending Users")
+    pending_users = [u for u in users if u["approved"] == 0]
+
+    if not pending_users:
+        st.info("No pending users to approve.")
+    else:
+        for u in pending_users:
+            st.write(f"- {u['username']} ({u['role']})")
+            if st.button(f"Approve {u['username']}", key=f"approve_{u['username']}"):
+                approve_user(u['username'])
+                st.success(f"{u['username']} approved!")
+                st.experimental_rerun()
+
 # ----------------- MAIN -----------------
 def main():
     if not st.session_state.username:
@@ -129,7 +144,7 @@ def main():
     elif st.session_state.role == "Instructor":
         instructor_dashboard()
     elif st.session_state.role == "Admin":
-        st.success("✅ Admin interface coming soon.")
+        admin_dashboard()
 
 if __name__ == "__main__":
     main()
