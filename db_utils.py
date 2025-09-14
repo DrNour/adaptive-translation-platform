@@ -1,3 +1,18 @@
+# Self-contained helper functions
+def load_idioms_from_file(filepath="idioms.json"):
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+
+def classify_translation_issues(source_text, student_translation, idioms_dict, lang="en"):
+    return {
+        "semantic_score": 0,
+        "semantic_flag": False,
+        "idiom_issues": {},
+        "grammar": []
+    }
 import sqlite3
 import json
 import csv
@@ -67,3 +82,4 @@ def init_db():
     )""")
     conn.commit()
     conn.close()
+
