@@ -1,156 +1,193 @@
-# db_utils.py
-import sqlite3
-from datetime import datetime
+import sqlite3, json, csv
+from tutor_utils import classify_translation_issues, load_idioms_from_file
 
-DB_PATH = "app.db"
+DB_FILE = "app.db"
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    # Users table
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS users (
+    c.execute("""CREATE TABLE IF NOT EXISTS users (
         username TEXT PRIMARY KEY,
         password TEXT,
-        role TEXT
-    )
-    """)
-    # Tasks table
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS tasks (
-        task_id INTEGER PRIMARY KEY,
-        text TEXT
-    )
-    """)
-    # Submissions table
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS submissions (
+        role TEXT,
+        approved INTEGER DEFAULT 0
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS submissions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT,
-        task_id INTEGER,
-        original TEXT,
-        mt TEXT,
-        post_edit TEXT,
-        bleu REAL,
-        chrf REAL,
-        semantic REAL,
-        edits REAL,
-        effort REAL,
-        fluency REAL,
-        collocations REAL,
-        idioms REAL,
-        submitted_at TEXT
-    )
-    """)
-    # Practice items
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS practice (
-        practice_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source_text TEXT,
+        student_translation TEXT,
+        reference TEXT,
+        target_lang TEXT
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS practice_bank (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         category TEXT,
         prompt TEXT,
         reference TEXT
-    )
-    """)
-    # Student practice assignments
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS student_practice (
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS practice_assignments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT,
-        practice_id INTEGER,
-        status TEXT DEFAULT 'recommended',
-        assigned_at TEXT,
-        completed_at TEXT
-    )
-    """)
-    # Insert default user and task
-    c.execute("INSERT OR IGNORE INTO users VALUES ('student1','pass','Student')")
-    c.execute("INSERT OR IGNORE INTO tasks (task_id, text) VALUES (1, 'Translate the following paragraph about AI.')")
+        practice_id INTEGER
+    )""")
     conn.commit()
     conn.close()
 
 def register_user(username, password, role):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    try:
-        c.execute("INSERT INTO users VALUES (?,?,?)", (username, password, role))
-        conn.commit()
-        return True
-    except:
-        return False
-    finally:
-        conn.close()
+    c.execute("INSERT OR REPLACE INTO users (username, password, role, approved) VALUES (?,?,?,0)",
+              (username, password, role))
+    conn.commit()
+    conn.close()
 
-def validate_login(username, password):
-    conn = sqlite3.connect(DB_PATH)
+def login_user(username, password):
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
+    c.execute("SELECT * FROM users WHERE username=? AND password=? AND approved=1", (username, password))
     user = c.fetchone()
     conn.close()
     return user is not None
 
 def get_user_role(username):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("SELECT role FROM users WHERE username=?", (username,))
     role = c.fetchone()
     conn.close()
     return role[0] if role else None
 
-def get_tasks():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT task_id, text FROM tasks")
-    tasks = c.fetchall()
-    conn.close()
-    return tasks
-
-def save_submission(username, task_id, original, mt, post_edit,
-                    bleu, chrf, semantic, edits, effort,
-                    fluency, collocations, idioms):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("""
-    INSERT INTO submissions (username, task_id, original, mt, post_edit,
-        bleu, chrf, semantic, edits, effort, fluency, collocations, idioms, submitted_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    """, (username, task_id, original, mt, post_edit,
-          bleu, chrf, semantic, edits, effort, fluency, collocations, idioms,
-          datetime.now().isoformat()))
-    conn.commit()
-    conn.close()
-
-def get_student_practice(username):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("""
-    SELECT sp.id, p.practice_id, p.category, p.prompt, p.reference, sp.status, sp.assigned_at, sp.completed_at
-    FROM student_practice sp
-    JOIN practice p ON sp.practice_id = p.practice_id
-    WHERE sp.username=?
-    """, (username,))
-    queue = c.fetchall()
-    conn.close()
-    return queue
-
 def add_practice_item(category, prompt, reference):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("INSERT INTO practice (category, prompt, reference) VALUES (?,?,?)", (category, prompt, reference))
+    c.execute("INSERT INTO practice_bank (category, prompt, reference) VALUES (?,?,?)", (category, prompt, reference))
+    conn.commit()
+    pid = c.lastrowid
+    conn.close()
+    return pid
+
+def assign_practices_to_user(username, practice_ids):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    for pid in practice_ids:
+        c.execute("INSERT INTO practice_assignments (username, practice_id) VALUES (?,?)", (username, pid))
     conn.commit()
     conn.close()
 
-def mark_practice_completed(sp_id, answer, username):
-    conn = sqlite3.connect(DB_PATH)
+def get_user_practice_queue(username):
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("UPDATE student_practice SET status='completed', completed_at=? WHERE id=?",
-              (datetime.now().isoformat(), sp_id))
-    conn.commit()
+    c.execute("""SELECT p.category, p.prompt FROM practice_assignments a
+                 JOIN practice_bank p ON a.practice_id = p.id
+                 WHERE a.username=?""", (username,))
+    rows = c.fetchall()
+    conn.close()
+    return [{"category": r[0], "prompt": r[1]} for r in rows]
+
+def get_all_submissions():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT username, source_text, student_translation, reference, target_lang FROM submissions")
+    rows = c.fetchall()
+    conn.close()
+    return [
+        {"username": r[0], "source_text": r[1], "student_translation": r[2], "reference": r[3], "target_lang": r[4]}
+        for r in rows
+    ]
+
+def get_all_users():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT username, role, approved FROM users")
+    rows = c.fetchall()
+    conn.close()
+    return [{"username": r[0], "role": r[1], "approved": r[2]} for r in rows]
+
+def export_submissions_with_errors(filepath="submissions_with_errors.csv"):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT username, source_text, student_translation, reference, target_lang FROM submissions")
+    rows = c.fetchall()
     conn.close()
 
-def get_practice_bank():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT * FROM practice")
-    items = c.fetchall()
-    conn.close()
-    return items
+    headers = ["username", "source_text", "student_translation", "reference", "target_lang",
+               "semantic_score", "semantic_flag", "idiom_issues", "grammar_issues"]
+
+    idioms_dict = load_idioms_from_file("idioms.json")
+    export_rows = []
+    for r in rows:
+        uname, src, stud_tr, ref, tgt_lang = r
+        rep = classify_translation_issues(src, stud_tr, idioms_dict, lang=tgt_lang)
+        export_rows.append([
+            uname, src, stud_tr, ref, tgt_lang,
+            rep.get("semantic_score"), rep.get("semantic_flag"),
+            json.dumps(rep.get("idiom_issues", {}), ensure_ascii=False),
+            json.dumps(rep.get("grammar", []), ensure_ascii=False)
+        ])
+
+    with open(filepath, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(headers)
+        writer.writerows(export_rows)
+
+    return filepath
+
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
+import matplotlib.pyplot as plt
+import io
+
+def export_instructor_report_pdf(filepath="instructor_report.pdf"):
+    submissions = get_all_submissions()
+    idioms_dict = load_idioms_from_file("idioms.json")
+
+    error_counts = {"semantic": 0, "idiom": 0, "grammar": 0}
+    idiom_misses = {}
+
+    for sub in submissions:
+        rep = classify_translation_issues(sub["source_text"], sub["student_translation"], idioms_dict, lang=sub["target_lang"])
+        if rep.get("semantic_flag"):
+            error_counts["semantic"] += 1
+        for idiom, info in rep.get("idiom_issues", {}).items():
+            if info["status"] == "non-idiomatic":
+                error_counts["idiom"] += 1
+                idiom_misses[idiom] = idiom_misses.get(idiom, 0) + 1
+        if rep.get("grammar"):
+            error_counts["grammar"] += len(rep["grammar"])
+
+    doc = SimpleDocTemplate(filepath, pagesize=A4)
+    styles = getSampleStyleSheet()
+    elements = []
+    elements.append(Paragraph("Instructor Report", styles["Title"]))
+    elements.append(Spacer(1, 12))
+
+    elements.append(Paragraph("Error Distribution:", styles["Heading2"]))
+    data = [["Error Type", "Count"]] + [[k, v] for k, v in error_counts.items()]
+    table = Table(data)
+    table.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+                               ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                               ("GRID", (0, 0), (-1, -1), 1, colors.black)]))
+    elements.append(table)
+    elements.append(Spacer(1, 12))
+
+    if idiom_misses:
+        elements.append(Paragraph("Most Frequently Mistranslated Idioms:", styles["Heading2"]))
+        idiom_data = [["Idiom", "Miss Count"]] + sorted(idiom_misses.items(), key=lambda x: -x[1])[:5]
+        idiom_table = Table(idiom_data)
+        idiom_table.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 1, colors.black)]))
+        elements.append(idiom_table)
+        elements.append(Spacer(1, 12))
+
+    plt.bar(error_counts.keys(), error_counts.values())
+    plt.title("Error Distribution")
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png")
+    plt.close()
+    buf.seek(0)
+    elements.append(Image(buf, width=400, height=200))
+
+    doc.build(elements)
+    return filepath
