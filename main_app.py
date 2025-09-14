@@ -8,7 +8,8 @@ from db_utils import (
     get_all_submissions, get_all_users,
     export_submissions_with_errors, export_instructor_report_pdf,
     load_idioms_from_file, classify_translation_issues,
-    highlight_errors, suggest_activities
+    highlight_errors, suggest_activities,
+    approve_user, delete_user, update_user_role
 )
 
 # -----------------------------
@@ -51,8 +52,13 @@ def login_section():
 # STUDENT DASHBOARD
 # -----------------------------
 def student_dashboard():
-    st.title("🎓 Student Dashboard")
+    # Logout button
+    if st.button("🔒 Logout"):
+        st.session_state.username = None
+        st.session_state.role = None
+        st.experimental_rerun()
 
+    st.title("🎓 Student Dashboard")
     source_text = st.text_area("Source Text")
     post_edit = st.text_area("Your Translation", height=150)
     target_lang = st.selectbox("Target Language", ["en", "ar"])
@@ -87,6 +93,12 @@ def student_dashboard():
 # INSTRUCTOR DASHBOARD
 # -----------------------------
 def instructor_dashboard():
+    # Logout button
+    if st.button("🔒 Logout"):
+        st.session_state.username = None
+        st.session_state.role = None
+        st.experimental_rerun()
+
     st.title("📊 Instructor Dashboard")
     submissions = get_all_submissions()
     users = get_all_users()
@@ -131,6 +143,44 @@ def instructor_dashboard():
             st.download_button("Download PDF File", f, file_name="instructor_report.pdf")
 
 # -----------------------------
+# ADMIN DASHBOARD
+# -----------------------------
+def admin_dashboard():
+    # Logout button
+    if st.button("🔒 Logout"):
+        st.session_state.username = None
+        st.session_state.role = None
+        st.experimental_rerun()
+
+    st.title("🛠 Admin Dashboard")
+    users = get_all_users()
+    st.markdown("### Registered Users")
+    for u in users:
+        st.write(f"- {u['username']} | Role: {u['role']} | Approved: {u['approved']}")
+        cols = st.columns(3)
+
+        # Approve button
+        if not u['approved']:
+            if cols[0].button(f"Approve {u['username']}", key=f"approve_{u['username']}"):
+                approve_user(u['username'])
+                st.experimental_rerun()
+
+        # Delete button
+        if cols[1].button(f"Delete {u['username']}", key=f"delete_{u['username']}"):
+            delete_user(u['username'])
+            st.experimental_rerun()
+
+        # Change role
+        new_role = cols[2].selectbox(
+            "Change Role", ["Student", "Instructor", "Admin"],
+            index=["Student", "Instructor", "Admin"].index(u['role']),
+            key=f"role_{u['username']}"
+        )
+        if new_role != u['role']:
+            update_user_role(u['username'], new_role)
+            st.experimental_rerun()
+
+# -----------------------------
 # MAIN
 # -----------------------------
 def main():
@@ -141,7 +191,7 @@ def main():
     elif st.session_state.role == "Instructor":
         instructor_dashboard()
     elif st.session_state.role == "Admin":
-        st.success("✅ Admin interface coming soon.")
+        admin_dashboard()
 
 if __name__ == "__main__":
     main()
