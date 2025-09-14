@@ -1,3 +1,24 @@
+import sqlite3
+
+# ----------------- AUTO-CREATE ADMIN -----------------
+DB_FILE = "app.db"
+conn = sqlite3.connect(DB_FILE)
+c = conn.cursor()
+
+# Check if admin exists
+c.execute("SELECT * FROM users WHERE username='admin'")
+if not c.fetchone():
+    # Create admin account with approved=1
+    c.execute("INSERT INTO users (username, password, role, approved) VALUES (?,?,?,1)",
+              ("admin", "admin123", "Admin", 1))
+    print("Admin account created: username='admin', password='admin123'")
+else:
+    # Make sure admin is approved and role correct
+    c.execute("UPDATE users SET password='admin123', role='Admin', approved=1 WHERE username='admin'")
+    print("Admin account verified and approved.")
+
+conn.commit()
+conn.close()
 import nltk
 nltk.download('punkt')
 import streamlit as st
@@ -179,3 +200,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
