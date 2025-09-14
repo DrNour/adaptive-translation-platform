@@ -9,10 +9,7 @@ from db_utils import (
     init_db, register_user, login_user, get_user_role,
     add_practice_item, assign_practices_to_user, get_user_practice_queue,
     get_all_submissions, get_all_users,
-    export_submissions_with_errors, export_instructor_report_pdf
-)
-
-from tutor_utils import (
+    export_submissions_with_errors, export_instructor_report_pdf,
     load_idioms_from_file, classify_translation_issues,
     highlight_errors, suggest_activities
 )
