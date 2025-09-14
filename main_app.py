@@ -1,156 +1,133 @@
 import streamlit as st
-from db_utils import *
-from metrics_utils import *
-from datetime import datetime
+from db_utils import (
+    init_db, register_user, login_user, get_user_role,
+    add_practice_item, assign_practices_to_user, get_user_practice_queue,
+    get_all_submissions, get_all_users,
+    export_submissions_with_errors, export_instructor_report_pdf
+)
+from tutor_utils import (
+    load_idioms_from_file, classify_translation_issues,
+    highlight_errors, suggest_activities
+)
 
-# -----------------------------
-# LOGIN / REGISTER
-# -----------------------------
-def show_login():
-    st.markdown("### 🔐 Login")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-    if st.button("Login"):
-        if validate_login(username, password):
+# Initialize DB
+init_db()
+
+# Session state
+if "username" not in st.session_state:
+    st.session_state.username = None
+    st.session_state.role = None
+
+# ----------------- LOGIN / REGISTER -----------------
+def login_section():
+    st.sidebar.header("Login")
+    username = st.sidebar.text_input("Username")
+    password = st.sidebar.text_input("Password", type="password")
+    if st.sidebar.button("Login"):
+        if login_user(username, password):
             st.session_state.username = username
             st.session_state.role = get_user_role(username)
+            st.success(f"Welcome, {username} ({st.session_state.role})")
             st.experimental_rerun()
         else:
-            st.error("Invalid login")
+            st.error("Invalid credentials or not approved yet.")
 
-def show_register():
-    st.markdown("### 📝 Register")
-    username = st.text_input("Username", key="r_user")
-    password = st.text_input("Password", type="password", key="r_pass")
-    role = st.selectbox("Role", ["Student", "Instructor"])
-    if st.button("Register"):
-        ok = register_user(username, password, role)
-        if ok:
-            st.success("Registration successful! You can now login.")
-        else:
-            st.error("Username already exists.")
+    st.sidebar.header("Register")
+    new_user = st.sidebar.text_input("New Username")
+    new_pass = st.sidebar.text_input("New Password", type="password")
+    role = st.sidebar.selectbox("Role", ["Student", "Instructor"])
+    if st.sidebar.button("Register"):
+        register_user(new_user, new_pass, role)
+        st.info("Registration submitted. Awaiting admin approval.")
 
-# -----------------------------
-# DASHBOARDS
-# -----------------------------
+# ----------------- STUDENT DASHBOARD -----------------
 def student_dashboard():
-    st.sidebar.markdown(f"👤 Logged in as: {st.session_state.username} ({st.session_state.role})")
-    st.sidebar.button("Logout", on_click=lambda: st.session_state.clear())
-
     st.title("🎓 Student Dashboard")
+    source_text = st.text_area("Source Text")
+    post_edit = st.text_area("Your Translation", height=150)
+    target_lang = st.selectbox("Target Language", ["en", "ar"])
+    reference = st.text_area("Reference Translation (optional)", height=100)
 
-    # Tasks
-    st.subheader("📌 Translation Tasks")
-    tasks = get_tasks()
-    if not tasks:
-        st.info("No tasks assigned yet.")
-    else:
-        for tid, text in tasks:
-            st.markdown(f"**Task {tid}:** {text}")
-            mt_text = st.text_area("Machine Translation (for comparison)", key=f"mt_{tid}")
-            post_edit = st.text_area("Your Translation / Post-edit", key=f"pe_{tid}")
-            if st.button(f"Submit Task {tid}"):
-                bleu, chrf = compute_bleu_chrf(text, post_edit)
-                semantic = compute_semantic_score(text, post_edit)
-                edits, effort = compute_edits_effort(mt_text, post_edit)
-                
-                # Placeholder error feedback
-                fluency = 80.0
-                collocations = 75.0
-                idioms = 70.0
+    if st.button("Submit Translation"):
+        idioms_dict = load_idioms_from_file("idioms.json")
+        report = classify_translation_issues(source_text, post_edit, idioms_dict, lang=target_lang)
 
-                save_submission(st.session_state.username, tid, text, mt_text, post_edit,
-                                bleu, chrf, semantic, edits, effort,
-                                fluency, collocations, idioms)
-                st.success("Submission saved!")
+        st.markdown("### 🔍 Error Highlighting")
+        highlighted = highlight_errors(post_edit, report)
+        st.markdown(highlighted, unsafe_allow_html=True)
 
-    # Progress radar
-    st.subheader("📊 My Progress")
-    # Dummy metrics aggregation
-    metrics = {
-        "BLEU": 70,
-        "chrF": 65,
-        "Semantic": 80,
-        "Effort": 20,
-        "Edits": 5,
-        "Fluency": 80,
-        "Collocations": 75,
-        "Idioms": 70
-    }
-    fig = plot_radar_for_student_metrics(metrics)
-    st.plotly_chart(fig, use_container_width=True)
+        st.markdown("### 🎯 Adaptive Suggestions")
+        suggestions = suggest_activities(report)
+        if not suggestions:
+            st.success("✅ No major issues detected. Great job!")
+        else:
+            for idx, s in enumerate(suggestions):
+                st.write(f"- {s['type'].capitalize()} → {s['prompt']}")
+                if st.button(f"Add to practice queue ({s['type']})", key=f"pr_{idx}"):
+                    pid = add_practice_item(s["type"], s["prompt"], "")
+                    assign_practices_to_user(st.session_state.username, [pid])
+                    st.success("Added to your practice queue.")
 
-    # Practice Queue
-    st.subheader("🗂 My Practice Queue")
-    queue = get_student_practice(st.session_state.username)
-    if not queue:
-        st.info("No practice items yet.")
-    else:
-        for sp_id, pid, cat, prompt, ref, status, assigned_at, completed_at in queue:
-            st.markdown(f"**[{status.upper()}]** ({cat}) {prompt}")
-            if status == "recommended":
-                if st.button(f"Do Practice {sp_id}"):
-                    st.session_state.active_practice = (sp_id, prompt, ref)
-                    st.experimental_rerun()
-            if status == "completed":
-                st.caption(f"Completed: {completed_at}")
+    st.markdown("### 📚 My Practice Queue")
+    queue = get_user_practice_queue(st.session_state.username)
+    for q in queue:
+        st.write(f"- {q['category']}: {q['prompt']}")
 
-        if "active_practice" in st.session_state and st.session_state.active_practice:
-            sp_id, prompt, ref = st.session_state.active_practice
-            st.text_area("Practice prompt", prompt, disabled=True)
-            ans = st.text_area("Your translation", key=f"prac_{sp_id}")
-            if st.button("Submit Practice"):
-                mark_practice_completed(sp_id, ans, st.session_state.username)
-                st.success("Practice completed!")
-                st.session_state.active_practice = None
-                st.experimental_rerun()
-
+# ----------------- INSTRUCTOR DASHBOARD -----------------
 def instructor_dashboard():
-    st.sidebar.markdown(f"👤 Logged in as: {st.session_state.username} ({st.session_state.role})")
-    st.sidebar.button("Logout", on_click=lambda: st.session_state.clear())
+    st.title("📊 Instructor Dashboard")
+    submissions = get_all_submissions()
+    users = get_all_users()
+    idioms_dict = load_idioms_from_file("idioms.json")
 
-    st.title("👨‍🏫 Instructor Dashboard")
-    st.subheader("📌 Practice Bank")
-    cat = st.text_input("Category")
-    prompt = st.text_area("Practice prompt")
-    ref = st.text_area("Reference translation")
-    if st.button("Add Practice"):
-        add_practice_item(cat, prompt, ref)
-        st.success("Practice added!")
-
-    st.subheader("🔧 All Practices")
-    practices = get_practice_bank()
-    st.table(practices)
-
-def admin_dashboard():
-    st.sidebar.markdown(f"👤 Logged in as: {st.session_state.username} ({st.session_state.role})")
-    st.sidebar.button("Logout", on_click=lambda: st.session_state.clear())
-
-    st.title("🛠 Admin Dashboard")
-    st.info("Admin features like thresholds can be added here.")
-
-# -----------------------------
-# MAIN
-# -----------------------------
-def main():
-    init_db()
-    if "username" not in st.session_state:
-        st.session_state.username = None
-
-    if st.session_state.username is None:
-        tab1, tab2 = st.tabs(["Login", "Register"])
-        with tab1:
-            show_login()
-        with tab2:
-            show_register()
+    if not submissions:
+        st.info("No student submissions yet.")
     else:
-        role = st.session_state.role
-        if role == "Student":
-            student_dashboard()
-        elif role == "Instructor":
-            instructor_dashboard()
-        elif role == "Admin":
-            admin_dashboard()
+        error_counts = {"semantic": 0, "idiom": 0, "grammar": 0}
+        idiom_misses = {}
+
+        for sub in submissions:
+            rep = classify_translation_issues(
+                sub["source_text"], sub["student_translation"],
+                idioms_dict, lang=sub["target_lang"]
+            )
+            if rep.get("semantic_flag"):
+                error_counts["semantic"] += 1
+            for idiom, info in rep.get("idiom_issues", {}).items():
+                if info["status"] == "non-idiomatic":
+                    error_counts["idiom"] += 1
+                    idiom_misses[idiom] = idiom_misses.get(idiom, 0) + 1
+            if rep.get("grammar"):
+                error_counts["grammar"] += len(rep["grammar"])
+
+        st.markdown("### ⚠️ Error Distribution")
+        st.bar_chart(error_counts)
+
+        if idiom_misses:
+            st.markdown("### ❌ Most Frequently Mistranslated Idioms")
+            for idiom, count in sorted(idiom_misses.items(), key=lambda x: -x[1])[:5]:
+                st.write(f"- {idiom}: {count} times")
+
+    if st.button("⬇️ Download Submissions + Errors as CSV"):
+        filepath = export_submissions_with_errors("submissions_with_errors.csv")
+        with open(filepath, "rb") as f:
+            st.download_button("Download CSV File", f, file_name="submissions_with_errors.csv")
+
+    if st.button("📄 Download Instructor Report (PDF)"):
+        filepath = export_instructor_report_pdf("instructor_report.pdf")
+        with open(filepath, "rb") as f:
+            st.download_button("Download PDF File", f, file_name="instructor_report.pdf")
+
+# ----------------- MAIN -----------------
+def main():
+    if not st.session_state.username:
+        login_section()
+    elif st.session_state.role == "Student":
+        student_dashboard()
+    elif st.session_state.role == "Instructor":
+        instructor_dashboard()
+    elif st.session_state.role == "Admin":
+        st.success("✅ Admin interface coming soon.")
 
 if __name__ == "__main__":
     main()
