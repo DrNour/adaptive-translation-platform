@@ -1,1 +1,7 @@
-streamlit>=1.25.0
+streamlit
+sqlite3
+sentence-transformers
+language-tool-python
+nltk
+reportlab
+matplotlib
