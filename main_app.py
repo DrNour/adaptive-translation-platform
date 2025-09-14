@@ -1,18 +1,19 @@
+import os
 import nltk
 nltk.download('punkt')
 import streamlit as st
 from db_utils import (
-    register_user, login_user, get_user_role,
+    register_user, login_user, get_user_role, approve_user,
     add_practice_item, assign_practices_to_user, get_user_practice_queue,
-    get_all_submissions, get_all_users, approve_user,
+    get_all_submissions, get_all_users,
     export_submissions_with_errors, export_instructor_report_pdf,
     load_idioms_from_file, classify_translation_issues, highlight_errors, suggest_activities
 )
 import sqlite3
 
-DB_FILE = "app.db"
+# ----------------- DATABASE CONFIG -----------------
+DB_FILE = os.path.join(os.getcwd(), "app.db")  # writable path
 
-# ----------------- DATABASE INIT & ADMIN -----------------
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -50,9 +51,6 @@ def init_db():
     )
     conn.commit()
     conn.close()
-
-# Initialize DB
-init_db()
 
 # ----------------- SESSION STATE -----------------
 if "username" not in st.session_state:
@@ -200,6 +198,9 @@ def admin_dashboard():
 
 # ----------------- MAIN -----------------
 def main():
+    # Init DB safely in writable path
+    init_db()
+
     if not st.session_state.username:
         login_section()
     elif st.session_state.role == "Student":
