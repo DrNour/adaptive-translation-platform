@@ -27,12 +27,13 @@ def login_section():
     st.sidebar.header("Login")
     username = st.sidebar.text_input("Username")
     password = st.sidebar.text_input("Password", type="password")
+    login_success = False
     if st.sidebar.button("Login"):
         if login_user(username, password):
             st.session_state.username = username
             st.session_state.role = get_user_role(username)
             st.success(f"Welcome, {username} ({st.session_state.role})")
-            st.experimental_rerun()
+            login_success = True
         else:
             st.error("Invalid credentials or not approved yet.")
 
@@ -41,15 +42,16 @@ def login_section():
     new_pass = st.sidebar.text_input("New Password", type="password")
     role = st.sidebar.selectbox("Role", ["Student", "Instructor"])
     if st.sidebar.button("Register"):
-        # Auto-approve students
-        approved = 1 if role == "Student" else 0
+        # Auto-approve everyone
         conn = sqlite3.connect("app.db")
         c = conn.cursor()
         c.execute("INSERT OR REPLACE INTO users (username, password, role, approved) VALUES (?,?,?,?)",
-                  (new_user, new_pass, role, approved))
+                  (new_user, new_pass, role, 1))
         conn.commit()
         conn.close()
-        st.info("Registration submitted. Students are automatically approved.")
+        st.info("Registration submitted. You are automatically approved.")
+
+    return login_success
 
 # ---------------- Student Dashboard ----------------
 def student_dashboard():
@@ -131,12 +133,14 @@ def instructor_dashboard():
 
 # ---------------- Main ----------------
 def main():
-    if not st.session_state.username:
-        login_section()
-    elif st.session_state.role == "Student":
-        student_dashboard()
-    elif st.session_state.role == "Instructor":
-        instructor_dashboard()
+    login_section()  # always show login/register
+
+    # Show dashboard if user logged in
+    if st.session_state.username:
+        if st.session_state.role == "Student":
+            student_dashboard()
+        elif st.session_state.role == "Instructor":
+            instructor_dashboard()
 
 if __name__ == "__main__":
     main()
